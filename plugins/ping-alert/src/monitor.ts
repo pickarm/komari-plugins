@@ -34,8 +34,10 @@ export function processProbes(previous: Monitor, probes: Probe[], r: Rules, maxG
     state.window.push(timeout ? 1 : 0);
     state.window = state.window.slice(-r.lossWindow);
     const loss = state.window.length === r.lossWindow ? state.window.reduce((a, b) => a + b, 0) / r.lossWindow * 100 : null;
-    const pingChange = r.pingEnabled ? advance(state.ping, timeout || (r.latencyEnabled && p.value > r.failureMs),
-      !timeout && (!r.latencyEnabled || p.value <= r.recoveryMs), r.failureCount, r.recoveryCount) : null;
+    const failed = p.value === -1 || (r.failureMs >= 0 && p.value > r.failureMs);
+    const recovered = !failed && (r.recoveryMs === null || p.value <= r.recoveryMs);
+    const pingChange = r.pingEnabled ? advance(state.ping, failed, recovered,
+      r.failureCount, r.recoveryCount) : null;
     if(!r.pingEnabled) state.ping={active:false,bad:0,good:0};
     if (pingChange !== null) changes.push({ rule: 'ping', recovered: pingChange, time: p.time,
       count: pingChange ? r.recoveryCount : r.failureCount, latency: p.value, lossPercent: loss });

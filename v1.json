@@ -9,12 +9,12 @@
         "zh-CN": "中文通知与模板模拟测试；按探测/丢包开关生成报告，两项关闭不报告，支持日/周/月及自定义周期。",
         "en": "Notification previews and simulations, with reports limited to enabled probe and loss metrics."
       },
-      "version": "1.2.0",
+      "version": "1.2.1",
       "author": "pickarm",
       "komari": ">=1.6.1",
       "url": "https://github.com/pickarm/komari-plugins",
-      "download": "https://github.com/pickarm/komari-plugins/releases/download/ping-alert-v1.2.0/ping-alert-1.2.0.zip",
-      "sha256": "185407b864bfd0da2813413d3c492e98f2a9753481142edef1e5587f1d22c61f"
+      "download": "https://github.com/pickarm/komari-plugins/releases/download/ping-alert-v1.2.1/ping-alert-1.2.1.zip",
+      "sha256": "202e9fc5510d08a1a1dfa75e6ff919991c19ba63f89aadb23d949317ed97c142"
     }
   ]
 }

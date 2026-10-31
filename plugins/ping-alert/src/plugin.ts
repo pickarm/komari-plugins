@@ -90,11 +90,11 @@ function alertEvent(change: Change, task: Task, uuid: string, nodes: Nodes, c: C
   const flags=reportMetrics(c);
   const message = [event, `任务：${task.name || task.id}`, `节点：${nodes[uuid]?.name || uuid}`,
     `目标：${task.target || '-'}`, `连续${change.recovered ? '恢复' : '异常'}探测：${change.count} 次`,
-    ...(flags.ping?[`本次延迟：${change.latency < 0 ? '超时/失败' : latencyText(change.latency)}`]:[]),
+    ...(flags.ping?[`本次延迟：${change.latency === -1 ? '-1（探测失败）' : `${change.latency.toFixed(2)} ms`}`]:[]),
     ...(flags.loss?[`最近 ${rules(c).lossWindow} 次丢包率：${lossText(change.lossPercent)}`]:[]), `探测时间：${localTime(change.time,c)}`].join('\n');
   const values: Record<string, string> = { task: task.name || String(task.id), task_id: String(task.id),
     node: nodes[uuid]?.name || uuid, uuid, target: task.target || '-', count: String(change.count),
-    latency: change.latency < 0 ? '超时/失败' : latencyText(change.latency), loss: lossText(change.lossPercent),
+    latency: change.latency === -1 ? '-1（探测失败）' : `${change.latency.toFixed(2)} ms`, loss: lossText(change.lossPercent),
     time: localTime(change.time,c), event, event_code:code, message };
   const template = str(change.recovered ? c.recovery_template : c.failure_template);
   return { event, code, emoji: change.recovered ? '✅' : '🚨', time: change.time, clients: [{ uuid }],clientLabel:nodes[uuid]?.name||uuid,

@@ -451,15 +451,18 @@
   var integer = (v, fallback, min, max) => Math.trunc(number(v, fallback, min, max));
   var ids = (v) => new Set(Array.isArray(v) ? v.map(String) : []);
   function rules(c) {
-    const failureMs = number(c.failure_latency_ms, 200, 1e-3, 6e5);
+    const failureValue = number(c.failure_delay_ms, -1, -1, 6e5);
+    const failureMs = failureValue < 0 ? -1 : failureValue;
+    const recoveryText = c.recovery_delay_ms;
+    const recoveryNumber = Number(recoveryText);
+    const recoveryMs = recoveryText == null || recoveryText === "" || recoveryText === "\u4E0D\u9650" || !Number.isFinite(recoveryNumber) || recoveryNumber < 0 ? null : Math.min(recoveryNumber, 6e5);
     const lossHigh = number(c.loss_failure_percent, 20, 1e-3, 100);
     return {
       pingEnabled: bool(c.enabled, true),
       failureCount: integer(c.failure_threshold, 10, 1, 1e3),
       recoveryCount: integer(c.recovery_threshold, 2, 1, 1e3),
-      latencyEnabled: bool(c.latency_enabled, false),
       failureMs,
-      recoveryMs: Math.min(failureMs, number(c.recovery_latency_ms, 150, 0, 6e5)),
+      recoveryMs,
       lossEnabled: bool(c.loss_enabled, false),
       lossWindow: integer(c.loss_window_probes, 20, 2, 1e3),
       lossHigh,
@@ -508,10 +511,12 @@
       state2.window.push(timeout ? 1 : 0);
       state2.window = state2.window.slice(-r.lossWindow);
       const loss = state2.window.length === r.lossWindow ? state2.window.reduce((a, b) => a + b, 0) / r.lossWindow * 100 : null;
+      const failed = p.value === -1 || r.failureMs >= 0 && p.value > r.failureMs;
+      const recovered = !failed && (r.recoveryMs === null || p.value <= r.recoveryMs);
       const pingChange = r.pingEnabled ? advance(
         state2.ping,
-        timeout || r.latencyEnabled && p.value > r.failureMs,
-        !timeout && (!r.latencyEnabled || p.value <= r.recoveryMs),
+        failed,
+        recovered,
         r.failureCount,
         r.recoveryCount
       ) : null;
@@ -717,7 +722,7 @@ ${rendered}` : rendered;
       `\u8282\u70B9\uFF1A${nodes[uuid]?.name || uuid}`,
       `\u76EE\u6807\uFF1A${task.target || "-"}`,
       `\u8FDE\u7EED${change.recovered ? "\u6062\u590D" : "\u5F02\u5E38"}\u63A2\u6D4B\uFF1A${change.count} \u6B21`,
-      ...flags.ping ? [`\u672C\u6B21\u5EF6\u8FDF\uFF1A${change.latency < 0 ? "\u8D85\u65F6/\u5931\u8D25" : latencyText(change.latency)}`] : [],
+      ...flags.ping ? [`\u672C\u6B21\u5EF6\u8FDF\uFF1A${change.latency === -1 ? "-1\uFF08\u63A2\u6D4B\u5931\u8D25\uFF09" : `${change.latency.toFixed(2)} ms`}`] : [],
       ...flags.loss ? [`\u6700\u8FD1 ${rules(c).lossWindow} \u6B21\u4E22\u5305\u7387\uFF1A${lossText(change.lossPercent)}`] : [],
       `\u63A2\u6D4B\u65F6\u95F4\uFF1A${localTime(change.time, c)}`
     ].join("\n");
@@ -728,7 +733,7 @@ ${rendered}` : rendered;
       uuid,
       target: task.target || "-",
       count: String(change.count),
-      latency: change.latency < 0 ? "\u8D85\u65F6/\u5931\u8D25" : latencyText(change.latency),
+      latency: change.latency === -1 ? "-1\uFF08\u63A2\u6D4B\u5931\u8D25\uFF09" : `${change.latency.toFixed(2)} ms`,
       loss: lossText(change.lossPercent),
       time: localTime(change.time, c),
       event,
