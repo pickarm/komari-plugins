@@ -1,0 +1,116 @@
+{
+  "$schema": "./node_modules/@komari-monitor/plugin-sdk/schema/komari-plugin.schema.json",
+  "name": {
+    "zh-CN": "Ping 失败告警",
+    "zh-TW": "Ping 失敗告警",
+    "en": "Ping Failure Alerts"
+  },
+  "short": "ping-alert",
+  "icon": "assets/ping-alert-icon.svg",
+  "komari": ">=1.6.1",
+  "description": {
+    "zh-CN": "为多个 Ping 任务提供连续失败阈值、恢复通知、去重与防误报告警。",
+    "zh-TW": "為多個 Ping 任務提供連續失敗閾值、恢復通知、去重與防誤報告警。",
+    "en": "Consecutive-failure thresholds, recovery notifications, deduplication and anti-flap alerts for multiple Ping tasks."
+  },
+  "version": "1.0.0",
+  "entry": "script.js",
+  "author": "pickarm",
+  "url": "https://github.com/pickarm/komari-ping-alert",
+  "permissions": {
+    "node": true,
+    "allowSystemRPC": true,
+    "timeout": 30
+  },
+  "configuration": {
+    "type": "managed",
+    "data": [
+      {
+        "key": "enabled",
+        "name": { "zh-CN": "启用告警", "zh-TW": "啟用告警", "en": "Enable alerts" },
+        "type": "switch",
+        "default": true
+      },
+      {
+        "key": "all_tasks",
+        "name": { "zh-CN": "监控全部 Ping 任务", "zh-TW": "監控全部 Ping 任務", "en": "Monitor all Ping tasks" },
+        "type": "switch",
+        "default": true,
+        "help": { "zh-CN": "关闭后仅监控下方选中的任务。", "zh-TW": "關閉後僅監控下方選中的任務。", "en": "When disabled, only the tasks selected below are monitored." }
+      },
+      {
+        "key": "ping_tasks",
+        "name": { "zh-CN": "选择 Ping 任务", "zh-TW": "選擇 Ping 任務", "en": "Select Ping tasks" },
+        "type": "pingtasks",
+        "default": "[]"
+      },
+      {
+        "key": "failure_threshold",
+        "name": { "zh-CN": "连续失败阈值", "zh-TW": "連續失敗閾值", "en": "Consecutive failure threshold" },
+        "type": "number",
+        "default": 10,
+        "help": { "zh-CN": "默认连续失败 10 次后通知，范围 1–1000；按实际探测样本计数，不是轮询次数。", "en": "10 consecutive failed probes by default; range 1–1000. Counts probes, not polls." }
+      },
+      {
+        "key": "recovery_threshold",
+        "name": { "zh-CN": "连续恢复阈值", "zh-TW": "連續恢復閾值", "en": "Consecutive recovery threshold" },
+        "type": "number",
+        "default": 2,
+        "help": { "zh-CN": "默认连续成功 2 次后发送恢复通知，减少抖动。", "zh-TW": "預設連續成功 2 次後傳送恢復通知，減少抖動。", "en": "Require 2 consecutive successes before recovery notification to reduce flapping." }
+      },
+      {
+        "key": "notify_recovery",
+        "name": { "zh-CN": "发送恢复通知", "zh-TW": "傳送恢復通知", "en": "Send recovery notifications" },
+        "type": "switch",
+        "default": true
+      },
+      {
+        "key": "poll_seconds",
+        "name": { "zh-CN": "检查间隔（秒）", "en": "Polling interval (seconds)" },
+        "type": "number", "default": 30,
+        "help": { "zh-CN": "范围 5–300 秒。修改后自动重新加载生效。", "en": "5–300 seconds; takes effect on reload." }
+      },
+      {
+        "key": "all_nodes",
+        "name": { "zh-CN": "监控任务内全部节点", "en": "Monitor all task nodes" },
+        "type": "switch", "default": true
+      },
+      {
+        "key": "nodes",
+        "name": { "zh-CN": "选择节点", "en": "Selected nodes" },
+        "type": "nodes", "default": "[]"
+      },
+      {
+        "key": "max_gap_seconds",
+        "name": { "zh-CN": "连续采样最大间隔（秒）", "en": "Maximum sample gap (seconds)" },
+        "type": "number", "default": 0,
+        "help": { "zh-CN": "0 为自动：取任务间隔的 3 倍与 90 秒中的较大值。超时重置连续计数，不自动恢复故障。自定义范围 1–86400。", "en": "0: auto (max of 3 task intervals and 90 seconds). Longer gaps reset streaks, not active incidents. Range 1–86400." }
+      },
+      {
+        "key": "startup_history",
+        "name": { "zh-CN": "首次启用时处理历史样本", "en": "Process history on first activation" },
+        "type": "switch", "default": false,
+        "help": { "zh-CN": "默认只累计启用后的新样本；开启可能对回溯窗口内已恢复的故障补发通知。", "en": "Off: count new probes only. On: historical incidents may generate notifications." }
+      },
+      {
+        "key": "failure_template",
+        "name": { "zh-CN": "故障通知模板", "en": "Failure notification template" },
+        "type": "richtext", "default": "",
+        "help": { "zh-CN": "留空使用默认内容。占位符：{{task}} {{task_id}} {{node}} {{uuid}} {{target}} {{count}} {{time}} {{event}} {{message}}。", "en": "Blank: default. Placeholders: {{task}}, {{task_id}}, {{node}}, {{uuid}}, {{target}}, {{count}}, {{time}}, {{event}}, {{message}}." }
+      },
+      {
+        "key": "recovery_template",
+        "name": { "zh-CN": "恢复通知模板", "en": "Recovery notification template" },
+        "type": "richtext", "default": "",
+        "help": { "zh-CN": "与故障模板支持相同占位符。", "en": "Supports the same placeholders as the failure template." }
+      },
+      {
+        "key": "lookback_minutes",
+        "name": { "zh-CN": "启动回溯分钟数", "zh-TW": "啟動回溯分鐘數", "en": "Startup lookback (minutes)" },
+        "type": "number",
+        "default": 10,
+        "help": { "zh-CN": "插件重启后用于恢复连续状态；范围 2–14，避免跨越原始采样保留窗口。", "zh-TW": "外掛重啟後用於恢復連續狀態；範圍 2–14，避免跨越原始取樣保留視窗。", "en": "Used to rebuild streak state after restart (2–14 minutes), staying within the raw sample window." }
+      }
+    ]
+  }
+}
