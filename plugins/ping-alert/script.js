@@ -441,268 +441,396 @@
   // src/plugin.ts
   var import_plugin_sdk = __toESM(require_src());
 
-  // src/core.ts
-  var EMPTY_ENTRY = {
-    lastProcessedAt: "",
-    failureStreak: 0,
-    successStreak: 0,
-    alertActive: false
-  };
-  function timestamp(value) {
-    const parsed = Date.parse(value);
-    return Number.isFinite(parsed) ? parsed : 0;
+  // src/config.ts
+  var bool = (v, fallback) => typeof v === "boolean" ? v : fallback;
+  var str = (v, fallback = "") => typeof v === "string" ? v : fallback;
+  function number(v, fallback, min, max) {
+    const n = Number(v);
+    return v == null || v === "" || !Number.isFinite(n) ? fallback : Math.max(min, Math.min(max, n));
   }
-  function processSamples(previous, samples, failureThreshold, recoveryThreshold, maxGapSeconds = 0) {
-    const entry = { ...previous ?? EMPTY_ENTRY };
-    const transitions = [];
-    const lastProcessed = timestamp(entry.lastProcessedAt);
-    const ordered = [...samples].filter((sample) => timestamp(sample.time) > lastProcessed).sort((left, right) => timestamp(left.time) - timestamp(right.time));
-    for (const sample of ordered) {
-      if (timestamp(sample.time) <= timestamp(entry.lastProcessedAt)) continue;
-      if (sample.value !== 0 && sample.value !== 1) continue;
-      if (maxGapSeconds > 0 && timestamp(sample.time) - timestamp(entry.lastProcessedAt) > maxGapSeconds * 1e3) {
-        entry.failureStreak = 0;
-        entry.successStreak = 0;
+  var integer = (v, fallback, min, max) => Math.trunc(number(v, fallback, min, max));
+  var ids = (v) => new Set(Array.isArray(v) ? v.map(String) : []);
+  function rules(c) {
+    const failureMs = number(c.failure_latency_ms, 200, 1e-3, 6e5);
+    const lossHigh = number(c.loss_failure_percent, 20, 1e-3, 100);
+    return {
+      failureCount: integer(c.failure_threshold, 10, 1, 1e3),
+      recoveryCount: integer(c.recovery_threshold, 2, 1, 1e3),
+      latencyEnabled: bool(c.latency_enabled, false),
+      failureMs,
+      recoveryMs: Math.min(failureMs, number(c.recovery_latency_ms, 150, 0, 6e5)),
+      lossEnabled: bool(c.loss_enabled, false),
+      lossWindow: integer(c.loss_window_probes, 20, 2, 1e3),
+      lossHigh,
+      lossLow: Math.min(lossHigh, number(c.loss_recovery_percent, 5, 0, 100)),
+      lossFailureCount: integer(c.loss_failure_probes, 1, 1, 1e3),
+      lossRecoveryCount: integer(c.loss_recovery_probes, 2, 1, 1e3)
+    };
+  }
+
+  // src/monitor.ts
+  function freshMonitor(time, old) {
+    return {
+      last: time,
+      ping: { active: old?.ping.active ?? false, bad: 0, good: 0 },
+      loss: { active: old?.loss.active ?? false, bad: 0, good: 0 },
+      window: []
+    };
+  }
+  function advance(s, bad, good, failN, recoverN) {
+    s.bad = bad ? Math.min(failN, s.bad + 1) : 0;
+    s.good = good ? Math.min(recoverN, s.good + 1) : 0;
+    if (!s.active && s.bad >= failN) {
+      s.active = true;
+      s.good = 0;
+      return false;
+    }
+    if (s.active && s.good >= recoverN) {
+      s.active = false;
+      s.bad = 0;
+      return true;
+    }
+    return null;
+  }
+  function processProbes(previous, probes, r, maxGapSeconds) {
+    const state2 = JSON.parse(JSON.stringify(previous));
+    const changes = [];
+    for (const p of [...probes].sort((a, b) => Date.parse(a.time) - Date.parse(b.time))) {
+      const ts = Date.parse(p.time);
+      if (!Number.isFinite(ts) || ts <= Date.parse(state2.last) || typeof p.value !== "number" || !Number.isFinite(p.value)) continue;
+      if (ts - Date.parse(state2.last) > maxGapSeconds * 1e3) {
+        state2.ping.bad = state2.ping.good = state2.loss.bad = state2.loss.good = 0;
+        state2.window = [];
       }
-      const failed = sample.value === 1;
-      entry.lastProcessedAt = sample.time;
-      if (failed) {
-        entry.successStreak = 0;
-        entry.failureStreak += 1;
-        if (!entry.alertActive && entry.failureStreak >= failureThreshold) {
-          entry.alertActive = true;
-          transitions.push({
-            type: "failure",
-            streak: entry.failureStreak,
-            time: sample.time
-          });
-        }
-        continue;
-      }
-      entry.failureStreak = 0;
-      if (!entry.alertActive) {
-        entry.successStreak = 0;
-        continue;
-      }
-      entry.successStreak += 1;
-      if (entry.successStreak >= recoveryThreshold) {
-        entry.alertActive = false;
-        transitions.push({
-          type: "recovery",
-          streak: entry.successStreak,
-          time: sample.time
+      state2.last = p.time;
+      const timeout = p.value < 0;
+      state2.window.push(timeout ? 1 : 0);
+      state2.window = state2.window.slice(-r.lossWindow);
+      const loss = state2.window.length === r.lossWindow ? state2.window.reduce((a, b) => a + b, 0) / r.lossWindow * 100 : null;
+      const pingChange = advance(
+        state2.ping,
+        timeout || r.latencyEnabled && p.value > r.failureMs,
+        !timeout && (!r.latencyEnabled || p.value <= r.recoveryMs),
+        r.failureCount,
+        r.recoveryCount
+      );
+      if (pingChange !== null) changes.push({
+        rule: "ping",
+        recovered: pingChange,
+        time: p.time,
+        count: pingChange ? r.recoveryCount : r.failureCount,
+        latency: p.value,
+        lossPercent: loss
+      });
+      if (r.lossEnabled && loss !== null) {
+        const lossChange = advance(
+          state2.loss,
+          loss >= r.lossHigh,
+          loss <= r.lossLow && loss < r.lossHigh,
+          r.lossFailureCount,
+          r.lossRecoveryCount
+        );
+        if (lossChange !== null) changes.push({
+          rule: "loss",
+          recovered: lossChange,
+          time: p.time,
+          count: lossChange ? r.lossRecoveryCount : r.lossFailureCount,
+          latency: p.value,
+          lossPercent: loss
         });
-        entry.successStreak = 0;
+      } else if (!r.lossEnabled) state2.loss = { active: false, bad: 0, good: 0 };
+    }
+    return { state: state2, changes };
+  }
+
+  // src/reports.ts
+  function reportRange(kind, now, customHours = 6) {
+    if (kind === "custom") return { start: new Date(now.getTime() - customHours * 36e5), end: now };
+    const end = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const start = new Date(end);
+    if (kind === "daily") start.setDate(start.getDate() - 1);
+    if (kind === "weekly") {
+      end.setDate(end.getDate() - (end.getDay() + 6) % 7);
+      start.setTime(end.getTime());
+      start.setDate(start.getDate() - 7);
+    }
+    if (kind === "monthly") {
+      end.setDate(1);
+      start.setTime(end.getTime());
+      start.setMonth(start.getMonth() - 1);
+    }
+    return { start, end };
+  }
+  function summarize(stats) {
+    let total = 0, lost = 0, valid = 0, latencySum = 0;
+    let approximate = false;
+    for (const s of stats) {
+      if (!Number.isFinite(s.total) || s.total <= 0 || !Number.isFinite(s.loss)) continue;
+      total += s.total;
+      lost += s.total * s.loss / 100;
+      approximate || (approximate = !!s.loss_approximate);
+      if (typeof s.avg === "number" && Number.isFinite(s.avg) && s.avg >= 0 && s.valid > 0) {
+        valid += s.valid;
+        latencySum += s.avg * s.valid;
       }
     }
-    return { entry, transitions };
+    return {
+      total,
+      averageLatency: valid ? latencySum / valid : null,
+      averageLoss: total ? lost / total * 100 : null,
+      approximate
+    };
   }
-  function monitorKey(taskId, nodeId) {
-    return `${String(taskId)}:${nodeId}`;
-  }
+  var latencyText = (v) => typeof v === "number" && Number.isFinite(v) && v >= 0 ? `${v.toFixed(2)} ms` : "\u65E0\u6210\u529F\u91C7\u6837";
+  var lossText = (v) => v === null ? "\u65E0\u6570\u636E" : `${v.toFixed(2)}%`;
 
   // src/plugin.ts
   var fs = __require("fs");
-  var STATE_FILE = `${__storageDir__}/state.json`;
-  var STATE_TMP_FILE = `${__storageDir__}/state.json.tmp`;
-  var STATE_VERSION = 1;
-  var state = { version: STATE_VERSION, entries: {} };
-  var polling = false;
-  function asBoolean(value, fallback) {
-    return typeof value === "boolean" ? value : fallback;
-  }
-  function asInteger(value, fallback, minimum, maximum) {
-    const parsed = typeof value === "number" ? value : Number(value);
-    if (value === void 0 || value === null || value === "" || !Number.isFinite(parsed)) return fallback;
-    return Math.min(maximum, Math.max(minimum, Math.trunc(parsed)));
-  }
-  function selectedTaskIds(value) {
-    if (!Array.isArray(value)) return /* @__PURE__ */ new Set();
-    return new Set(
-      value.filter((item) => typeof item === "number" || typeof item === "string").map(String)
-    );
-  }
-  function loadState() {
-    try {
-      fs.mkdirSync(__storageDir__, { recursive: true });
-      if (!fs.existsSync(STATE_FILE)) {
-        return { version: STATE_VERSION, entries: {} };
-      }
-      const parsed = JSON.parse(fs.readFileSync(STATE_FILE, "utf8"));
-      if (parsed.version !== STATE_VERSION || !parsed.entries) {
-        return { version: STATE_VERSION, entries: {} };
-      }
-      return parsed;
-    } catch (error) {
-      console.warn("ping-alert: failed to load state: %s", String(error));
-      return { version: STATE_VERSION, entries: {} };
-    }
-  }
-  function saveState() {
+  var stateFile = `${__storageDir__}/state-v2.json`;
+  var state;
+  var sessionStart;
+  var chain = Promise.resolve();
+  var jobs = /* @__PURE__ */ new Set();
+  function save() {
     fs.mkdirSync(__storageDir__, { recursive: true });
-    fs.writeFileSync(STATE_TMP_FILE, JSON.stringify(state, null, 2), "utf8");
-    fs.renameSync(STATE_TMP_FILE, STATE_FILE);
+    fs.writeFileSync(`${stateFile}.tmp`, JSON.stringify(state), "utf8");
+    fs.renameSync(`${stateFile}.tmp`, stateFile);
   }
-  async function nodeMap() {
-    const nodes = await import_plugin_sdk.server.call("common:getNodes");
-    return new Map(Object.entries(nodes ?? {}));
-  }
-  async function queryTaskSamples(taskId, nodeIds, lookbackMinutes) {
-    const response = await import_plugin_sdk.server.call("public:queryMetrics", {
-      metric_keys: ["ping.loss"],
-      entity_ids: nodeIds,
-      start: new Date(Date.now() - lookbackMinutes * 6e4).toISOString(),
-      end: (/* @__PURE__ */ new Date()).toISOString(),
-      tags: { task_id: taskId },
-      fill_empty: false,
-      max_points: 1e3
-    });
-    const result = /* @__PURE__ */ new Map();
-    for (const series of response.series ?? []) {
-      if (!series.entity_id) continue;
-      if (series.downsampled !== false) throw new Error("Raw Ping samples required; aggregated series cannot establish consecutive failures");
-      result.set(series.entity_id, series.points ?? []);
-    }
-    return result;
-  }
-  function taskLabel(task) {
-    return task.name?.trim() || `Ping #${String(task.id)}`;
-  }
-  function nodeLabel(nodeId, nodes) {
-    return nodes.get(nodeId)?.name?.trim() || nodeId;
-  }
-  async function notify(transition, task, nodeId, nodes, config) {
-    const failed = transition.type === "failure";
-    const event = failed ? "PingFailure" : "PingRecovery";
-    const emoji = failed ? "\u{1F6A8}" : "\u2705";
-    const status = failed ? "Ping task failed" : "Ping task recovered";
-    const defaultMessage = [
-      status,
-      `Task: ${taskLabel(task)}`,
-      `Node: ${nodeLabel(nodeId, nodes)}`,
-      `Target: ${task.target || "-"}`,
-      failed ? `Consecutive failures: ${transition.streak}` : `Consecutive successes: ${transition.streak}`,
-      `Checked at: ${transition.time}`
-    ].join("\n");
-    const template = failed ? config.failure_template : config.recovery_template;
-    const values = {
-      task: taskLabel(task),
-      task_id: String(task.id),
-      node: nodeLabel(nodeId, nodes),
-      uuid: nodeId,
-      target: task.target || "-",
-      count: String(transition.streak),
-      time: transition.time,
-      event,
-      message: defaultMessage
-    };
-    const message = typeof template === "string" && template.trim() ? template.replace(/\{\{(\w+)\}\}/g, (match, key) => values[key] ?? match) : defaultMessage;
-    await import_plugin_sdk.server.call("admin:sendNotification", {
-      event: {
-        event,
-        emoji,
-        message,
-        time: (/* @__PURE__ */ new Date()).toISOString(),
-        clients: [{ uuid: nodeId }]
+  function readState() {
+    if (!fs.existsSync(stateFile)) {
+      const initial = { version: 2, entries: {}, pending: [], reports: {}, requests: [] };
+      const legacyPath = `${__storageDir__}/state.json`;
+      if (fs.existsSync(legacyPath)) {
+        const legacy = JSON.parse(fs.readFileSync(legacyPath, "utf8"));
+        for (const [key, old] of Object.entries(legacy.entries ?? {})) {
+          const monitor = freshMonitor(sessionStart);
+          monitor.ping.active = old.alertActive === true;
+          initial.entries[key] = monitor;
+        }
+        if (legacy.pending?.length) console.warn("ping-alert: legacy queued notifications remain in state.json; history replay disabled in v1.1");
       }
-    });
+      return initial;
+    }
+    const parsed = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+    if (parsed.version !== 2 || !parsed.entries || !Array.isArray(parsed.pending) || !parsed.reports) throw new Error("Invalid persistent plugin state; restore state-v2.json from backup");
+    parsed.requests ?? (parsed.requests = []);
+    return parsed;
+  }
+  function job(key, fn) {
+    return () => {
+      if (jobs.has(key)) return chain;
+      jobs.add(key);
+      chain = chain.then(fn).catch((e) => console.error("ping-alert %s: %s", key, String(e))).finally(() => jobs.delete(key));
+      return chain;
+    };
+  }
+  function put(id, scope2, payload) {
+    if (state.pending.some((p) => p.id === id)) return;
+    if (state.pending.length >= 1e3) throw new Error("Notification queue full; check notification channels");
+    state.pending.push({ id, scope: scope2, payload, attempts: 0, next: 0 });
+  }
+  async function flush(c) {
+    const blocked = /* @__PURE__ */ new Set();
+    for (const p of [...state.pending]) {
+      if (blocked.has(p.scope)) continue;
+      if (p.next > Date.now()) {
+        blocked.add(p.scope);
+        continue;
+      }
+      if (p.scope.startsWith("alert:") && !bool(c.enabled, true) || p.scope.startsWith("report:") && !bool(c[`${p.scope.slice(7)}_enabled`], false)) continue;
+      try {
+        await import_plugin_sdk.server.call("admin:sendNotification", { event: p.payload });
+        state.pending = state.pending.filter((item) => item.id !== p.id);
+      } catch (e) {
+        p.attempts++;
+        p.next = Date.now() + Math.min(36e5, 3e4 * 2 ** Math.min(p.attempts, 7));
+        blocked.add(p.scope);
+        console.error("ping-alert: delivery queued for retry: %s", String(e));
+      }
+      save();
+    }
+  }
+  async function scope(c) {
+    const [allTasks, nodes] = await Promise.all([
+      import_plugin_sdk.server.call("admin:getAllPingTasks"),
+      import_plugin_sdk.server.call("common:getNodes")
+    ]);
+    const selectedTasks = ids(c.ping_tasks), selectedNodes = ids(c.nodes);
+    return { nodes, tasks: allTasks.filter((t) => bool(c.all_tasks, true) || selectedTasks.has(String(t.id))).map((t) => ({
+      ...t,
+      clients: [...new Set(t.clients ?? [])].filter((id) => nodes[id] && (bool(c.all_nodes, true) || selectedNodes.has(id)))
+    })).filter((t) => t.clients.length) };
+  }
+  function alertEvent(change, task, uuid, nodes, c) {
+    const event = change.rule === "ping" ? change.recovered ? "PingRecovery" : "PingFailure" : change.recovered ? "PingLossRecovery" : "PingLossFailure";
+    const title = `${change.rule === "ping" ? "Ping \u63A2\u6D4B" : "Ping \u4E22\u5305\u7387"}${change.recovered ? "\u6062\u590D" : "\u5F02\u5E38"}`;
+    const message = [
+      title,
+      `\u4EFB\u52A1\uFF1A${task.name || task.id}`,
+      `\u8282\u70B9\uFF1A${nodes[uuid]?.name || uuid}`,
+      `\u76EE\u6807\uFF1A${task.target || "-"}`,
+      `\u8FDE\u7EED${change.recovered ? "\u6062\u590D" : "\u5F02\u5E38"}\u63A2\u6D4B\uFF1A${change.count} \u6B21`,
+      `\u672C\u6B21\u5EF6\u8FDF\uFF1A${change.latency < 0 ? "\u8D85\u65F6/\u5931\u8D25" : latencyText(change.latency)}`,
+      `\u6700\u8FD1 ${rules(c).lossWindow} \u6B21\u4E22\u5305\u7387\uFF1A${lossText(change.lossPercent)}`,
+      `\u63A2\u6D4B\u65F6\u95F4\uFF1A${change.time}`
+    ].join("\n");
+    const values = {
+      task: task.name || String(task.id),
+      task_id: String(task.id),
+      node: nodes[uuid]?.name || uuid,
+      uuid,
+      target: task.target || "-",
+      count: String(change.count),
+      latency: change.latency < 0 ? "\u8D85\u65F6/\u5931\u8D25" : latencyText(change.latency),
+      loss: lossText(change.lossPercent),
+      time: change.time,
+      event,
+      message
+    };
+    const template = str(change.recovered ? c.recovery_template : c.failure_template);
+    return {
+      event,
+      emoji: change.recovered ? "\u2705" : "\u{1F6A8}",
+      time: change.time,
+      clients: [{ uuid }],
+      message: template.trim() ? template.replace(/\{\{(\w+)\}\}/g, (m, k) => values[k] ?? m) : message
+    };
   }
   async function poll() {
-    if (polling) return;
-    polling = true;
-    try {
-      const config = await import_plugin_sdk.server.getConfig();
-      if (!asBoolean(config.enabled, true)) return;
-      const failureThreshold = asInteger(config.failure_threshold, 10, 1, 1e3);
-      const recoveryThreshold = asInteger(config.recovery_threshold, 2, 1, 1e3);
-      const lookbackMinutes = asInteger(config.lookback_minutes, 10, 2, 14);
-      const notifyRecovery = asBoolean(config.notify_recovery, true);
-      const allTasks = asBoolean(config.all_tasks, true);
-      const configuredTasks = selectedTaskIds(config.ping_tasks);
-      const configuredNodes = selectedTaskIds(config.nodes);
-      const [tasks, nodes] = await Promise.all([
-        import_plugin_sdk.server.call("admin:getAllPingTasks"),
-        nodeMap()
-      ]);
-      const activeKeys = /* @__PURE__ */ new Set();
-      for (const task of tasks ?? []) {
-        if (task.id === void 0) continue;
-        const taskId = String(task.id);
-        if (!allTasks && !configuredTasks.has(taskId)) continue;
-        const nodeIds = [...new Set(task.clients ?? [])].filter((id) => nodes.has(id) && (asBoolean(config.all_nodes, true) || configuredNodes.has(id)));
-        if (nodeIds.length === 0) continue;
-        for (const nodeId of nodeIds) activeKeys.add(monitorKey(taskId, nodeId));
-        let samplesByNode;
-        try {
-          samplesByNode = await queryTaskSamples(taskId, nodeIds, lookbackMinutes);
-        } catch (error) {
-          console.warn(
-            "ping-alert: query failed for task %s: %s",
-            taskId,
-            String(error)
-          );
-          continue;
-        }
-        for (const nodeId of nodeIds) {
-          const key = monitorKey(taskId, nodeId);
-          activeKeys.add(key);
-          const previous = state.entries[key] ?? {
-            lastProcessedAt: asBoolean(config.startup_history, false) ? "" : (/* @__PURE__ */ new Date()).toISOString(),
-            failureStreak: 0,
-            successStreak: 0,
-            alertActive: false
-          };
-          const result = processSamples(
-            previous,
-            samplesByNode.get(nodeId) ?? [],
-            failureThreshold,
-            recoveryThreshold,
-            asInteger(config.max_gap_seconds, 0, 0, 86400) || Math.max(90, (task.interval || 60) * 3)
-          );
-          state.entries[key] = result.entry;
-          for (const transition of result.transitions) {
-            if (transition.type === "recovery" && !notifyRecovery) continue;
-            state.pending ?? (state.pending = []);
-            if (state.pending.length >= 1e3) throw new Error("Notification outbox full; check channel configuration");
-            state.pending.push({ transition, task, nodeId, attempts: 0, nextAttempt: 0 });
-          }
-        }
-      }
-      for (const key of Object.keys(state.entries)) {
-        if (!activeKeys.has(key)) delete state.entries[key];
-      }
-      saveState();
-      for (const pending of [...state.pending ?? []]) {
-        if (pending.nextAttempt > Date.now()) continue;
-        if (!activeKeys.has(monitorKey(String(pending.task.id), pending.nodeId))) {
-          state.pending = state.pending?.filter((item) => item !== pending);
-          saveState();
-          continue;
-        }
-        try {
-          await notify(pending.transition, pending.task, pending.nodeId, nodes, config);
-          state.pending = state.pending?.filter((item) => item !== pending);
-        } catch (error) {
-          pending.attempts += 1;
-          pending.nextAttempt = Date.now() + Math.min(3600, 30 * 2 ** Math.min(pending.attempts, 7)) * 1e3;
-          console.error("ping-alert: notification queued for retry: %s", String(error));
-          saveState();
-          break;
-        }
-        saveState();
-      }
-    } catch (error) {
-      console.error("ping-alert: poll failed: %s", String(error));
-    } finally {
-      polling = false;
+    const c = await import_plugin_sdk.server.getConfig();
+    if (!bool(c.enabled, true)) {
+      await flush(c);
+      await drainReports();
+      return;
     }
+    const r = rules(c), selected = await scope(c), active = /* @__PURE__ */ new Set();
+    for (const task of selected.tasks) {
+      for (const uuid of task.clients) active.add(`${task.id}:${uuid}`);
+      const end = /* @__PURE__ */ new Date();
+      const cursor = Math.min(...task.clients.map((uuid) => Date.parse(state.entries[`${task.id}:${uuid}`]?.last || sessionStart)));
+      const start = new Date(Math.max(Date.parse(sessionStart), cursor - 1, end.getTime() - 3e5));
+      if (start >= end) continue;
+      try {
+        const response = await import_plugin_sdk.server.call("public:queryMetrics", {
+          metric_keys: ["ping.latency_ms"],
+          tags: { task_id: String(task.id) },
+          entity_ids: task.clients,
+          start: start.toISOString(),
+          end: end.toISOString(),
+          fill_empty: false,
+          max_points: 1e4
+        });
+        const series = response.series ?? [];
+        if (series.some((s) => s.downsampled !== false)) throw new Error("Aggregated data rejected: raw probes required");
+        const byNode = new Map(series.map((s) => [s.entity_id, s.points ?? []]));
+        for (const uuid of task.clients) {
+          const key = `${task.id}:${uuid}`;
+          const previous = state.entries[key] || freshMonitor(sessionStart);
+          const result = processProbes(previous, byNode.get(uuid) ?? [], r, Math.max(90, (task.interval || 60) * 3));
+          for (const change of result.changes) {
+            if (change.recovered && !bool(c.notify_recovery, true)) continue;
+            put(
+              `${key}:${change.rule}:${change.time}:${change.recovered}`,
+              `alert:${key}:${change.rule}`,
+              alertEvent(change, task, uuid, selected.nodes, c)
+            );
+          }
+          state.entries[key] = result.state;
+        }
+      } catch (e) {
+        console.error("ping-alert task %s: %s", task.id, String(e));
+      }
+    }
+    for (const key of Object.keys(state.entries)) if (!active.has(key)) delete state.entries[key];
+    state.pending = state.pending.filter((p) => !p.scope.startsWith("alert:") || active.has(p.scope.split(":").slice(1, 3).join(":")) && (!p.scope.endsWith(":loss") || r.lossEnabled));
+    save();
+    await flush(c);
+    await drainReports();
+  }
+  async function report(request) {
+    const { kind } = request;
+    const c = await import_plugin_sdk.server.getConfig();
+    if (!bool(c[`${kind}_enabled`], false)) return;
+    const start = new Date(request.start), end = new Date(request.end);
+    const rangeKey = `${start.toISOString()}/${end.toISOString()}`;
+    if (state.reports[kind] === rangeKey) return;
+    const { tasks, nodes } = await scope(c);
+    const lines = [], allStats = [];
+    for (const task of tasks) {
+      const response = await import_plugin_sdk.server.call("public:getPingMetricStats", {
+        entity_ids: task.clients,
+        task_ids: [task.id],
+        start: start.toISOString(),
+        end: new Date(end.getTime() - 1).toISOString(),
+        max_points: 1e4
+      });
+      const matching = response.stats.filter((s) => String(s.task_id) === String(task.id) && task.clients.includes(s.entity_id));
+      allStats.push(...matching);
+      for (const uuid of task.clients) {
+        const stat = matching.find((s) => s.entity_id === uuid);
+        lines.push(`${task.name || task.id} / ${nodes[uuid]?.name || uuid}\uFF1A${stat && stat.total > 0 ? `\u5E73\u5747\u5EF6\u8FDF ${latencyText(stat.avg)}\uFF0C\u5E73\u5747\u4E22\u5305\u7387 ${lossText(stat.loss)}${stat.loss_approximate ? "\uFF08\u4F30\u7B97\uFF09" : ""}\uFF0C${stat.total} \u6B21\u63A2\u6D4B` : "\u65E0\u6570\u636E"}`);
+      }
+    }
+    const totals = summarize(allStats);
+    const label = { daily: "\u65E5\u62A5", weekly: "\u5468\u62A5", monthly: "\u6708\u62A5", custom: "\u81EA\u5B9A\u4E49\u5468\u671F\u62A5\u544A" }[kind];
+    const event = `Ping${kind[0].toUpperCase()}${kind.slice(1)}Report`;
+    const message = [
+      `Ping ${label}`,
+      `${start.toISOString()} \u81F3 ${end.toISOString()}\uFF08\u4E0D\u542B\u7EC8\u70B9\uFF09`,
+      `\u603B\u4F53\u5E73\u5747\u5EF6\u8FDF\uFF1A${totals.total ? latencyText(totals.averageLatency) : "\u65E0\u6570\u636E"}`,
+      `\u603B\u4F53\u5E73\u5747\u4E22\u5305\u7387\uFF1A${lossText(totals.averageLoss)}${totals.approximate ? "\uFF08\u542B\u4F30\u7B97\uFF09" : ""}`,
+      `\u5B9E\u9645\u63A2\u6D4B\u603B\u6570\uFF1A${totals.total}`,
+      ...lines,
+      "\u7EDF\u8BA1\u6E90\uFF1AKomari \u5386\u53F2\u805A\u5408\u6570\u636E\uFF1B\u7F3A\u62A5\u4E0D\u8BA1\u4E3A\u4E22\u5305\uFF0C\u4FDD\u5B58\u671F\u4E0D\u8DB3\u65F6\u53EA\u8986\u76D6\u73B0\u5B58\u6570\u636E\u3002"
+    ].join("\n");
+    const id = `report:${kind}:${rangeKey}`;
+    put(id, `report:${kind}`, { event, message, emoji: "\u{1F4CA}", time: (/* @__PURE__ */ new Date()).toISOString() });
+    state.reports[kind] = rangeKey;
+    save();
+    await flush(c);
+  }
+  async function drainReports() {
+    const request = state.requests.find((r) => r.next <= Date.now());
+    if (!request) return;
+    try {
+      await report(request);
+      state.requests = state.requests.filter((r) => r !== request);
+    } catch (e) {
+      request.attempts++;
+      request.next = Date.now() + Math.min(36e5, 3e4 * 2 ** Math.min(request.attempts, 7));
+      console.error("ping-alert report queued for retry: %s", String(e));
+    }
+    save();
+  }
+  async function requestReport(kind) {
+    const c = await import_plugin_sdk.server.getConfig();
+    if (!bool(c[`${kind}_enabled`], false)) return;
+    const { start, end } = reportRange(kind, /* @__PURE__ */ new Date(), number(c.custom_hours, 6, 0.05, 8760));
+    const startText = start.toISOString(), endText = end.toISOString();
+    if (state.reports[kind] === `${startText}/${endText}` || state.requests.some((r) => r.kind === kind && r.start === startText && r.end === endText)) return;
+    if (state.requests.length >= 100) throw new Error("Report request queue full; check metrics API");
+    state.requests.push({ kind, start: startText, end: endText, next: 0, attempts: 0 });
+    save();
+    await drainReports();
   }
   (0, import_plugin_sdk.definePlugin)({
     async load() {
-      state = loadState();
-      const config = await import_plugin_sdk.server.getConfig();
-      import_plugin_sdk.server.cron(`@every ${asInteger(config.poll_seconds, 30, 5, 300)}s`, poll);
-      await poll();
+      sessionStart = (/* @__PURE__ */ new Date()).toISOString();
+      state = readState();
+      for (const [key, old] of Object.entries(state.entries)) state.entries[key] = freshMonitor(sessionStart, old);
+      save();
+      import_plugin_sdk.server.cron("@every 10s", job("poll", poll));
+      const c = await import_plugin_sdk.server.getConfig();
+      const schedules = { daily: "0 9 * * *", weekly: "0 9 * * 1", monthly: "0 9 1 * *", custom: "0 */6 * * *" };
+      for (const kind of Object.keys(schedules)) {
+        if (!bool(c[`${kind}_enabled`], false)) continue;
+        try {
+          import_plugin_sdk.server.cron(str(c[`${kind}_cron`], schedules[kind]).trim(), job(`report-${kind}`, () => requestReport(kind)));
+        } catch (e) {
+          console.error("ping-alert invalid %s report schedule: %s", kind, String(e));
+        }
+      }
+      await job("poll", poll)();
     }
   });
 })();

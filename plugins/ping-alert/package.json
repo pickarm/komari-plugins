@@ -1,13 +1,13 @@
 {
   "name": "komari-plugin-ping-alert",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "description": "Consecutive Ping failure and recovery alerts for Komari",
   "scripts": {
     "check": "komari-plugin-dev check",
     "build": "komari-plugin-dev build",
     "pack": "komari-plugin-dev pack",
-    "test": "vitest run",
+    "test": "npm run build && vitest run",
     "typecheck": "tsc --noEmit"
   },
   "komari": {
