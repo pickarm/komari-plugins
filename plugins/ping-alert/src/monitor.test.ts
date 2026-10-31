@@ -14,7 +14,7 @@ describe('probe-based rules', () => {
     expect(processProbes(tenth.state,[probe(11,-1)],r,90).changes).toEqual([]);
   });
   it('requires a low-latency recovery and resets consecutive counts in hysteresis band', () => {
-    const r = rules({latency_enabled:true,failure_threshold:2});
+    const r = rules({failure_delay_ms:200,recovery_delay_ms:150,failure_threshold:2});
     const bad = processProbes(freshMonitor(start),[probe(1,201),probe(2,250)],r,90);
     expect(bad.changes[0].recovered).toBe(false);
     const neutral = processProbes(bad.state,[probe(3,150),probe(4,175),probe(5,150)],r,90);
@@ -22,15 +22,19 @@ describe('probe-based rules', () => {
     expect(processProbes(neutral.state,[probe(6,100)],r,90).changes[0].recovered).toBe(true);
   });
   it('uses strictly greater-than failure threshold and inclusive recovery threshold', () => {
-    const r = rules({latency_enabled:true,failure_threshold:1});
+    const r = rules({failure_delay_ms:200,failure_threshold:1});
     expect(processProbes(freshMonitor(start),[probe(1,200)],r,90).changes).toEqual([]);
     expect(processProbes(freshMonitor(start),[probe(1,200.01)],r,90).changes).toHaveLength(1);
   });
-  it('ignores high latency when disabled, but still detects timeouts', () => {
+  it('defaults to exactly -1 as failure and otherwise unrestricted recovery', () => {
     const r = rules({failure_threshold:1});
+    expect(r.failureMs).toBe(-1);expect(r.recoveryMs).toBeNull();
     const high = processProbes(freshMonitor(start),[probe(1,9999)],r,90);
     expect(high.changes).toEqual([]);
     expect(processProbes(high.state,[probe(2,-1)],r,90).changes[0].recovered).toBe(false);
+    const failed=processProbes(high.state,[probe(2,-1)],r,90);
+    const recovered=processProbes(failed.state,[probe(3,99999),probe(4,99999)],r,90);
+    expect(recovered.changes[0].recovered).toBe(true);
   });
   it('requires a full rolling window and supports independent loss alerts and recovery', () => {
     const r = rules({loss_enabled:true,loss_window_probes:4,loss_failure_percent:50,loss_recovery_percent:0,loss_recovery_probes:1});
@@ -73,8 +77,29 @@ describe('probe-based rules', () => {
     const result = processProbes(s,[probe(1,null),probe(2,NaN),{time:'bad',value:-1}],rules({failure_threshold:1}),90);
     expect(result.changes).toEqual([]); expect(s).toEqual(freshMonitor(start));
   });
-  it('clamps thresholds and rejects non-finite configuration values', () => {
-    expect(rules({failure_threshold:NaN,failure_latency_ms:200,recovery_latency_ms:900,loss_failure_percent:20,loss_recovery_percent:90}))
-      .toMatchObject({failureCount:10,recoveryMs:200,lossLow:20});
+  it('keeps explicit definitions independent and ignores the superseded toggle and defaults', () => {
+    expect(rules({failure_threshold:NaN,failure_delay_ms:200,recovery_delay_ms:900,loss_failure_percent:20,loss_recovery_percent:90}))
+      .toMatchObject({failureCount:10,recoveryMs:900,lossLow:20});
+    expect(rules({latency_enabled:true,failure_latency_ms:300,recovery_latency_ms:300})).toMatchObject({failureMs:-1,recoveryMs:null});
+  });
+  it('uses a custom recovery limit with default -1 failure definition',()=>{
+    const r=rules({failure_threshold:1,recovery_threshold:1,recovery_delay_ms:'300'});
+    const failed=processProbes(freshMonitor(start),[probe(1,-1)],r,90);
+    expect(processProbes(failed.state,[probe(2,301)],r,90).changes).toEqual([]);
+    expect(processProbes(failed.state,[probe(2,300)],r,90).changes[0].recovered).toBe(true);
+  });
+  it('does not require a recovery limit when failure delay is customized',()=>{
+    const r=rules({failure_threshold:1,recovery_threshold:1,failure_delay_ms:300});
+    const failed=processProbes(freshMonitor(start),[probe(1,301)],r,90);
+    expect(processProbes(failed.state,[probe(2,300)],r,90).changes[0].recovered).toBe(true);
+    expect(processProbes(failed.state,[probe(2,-1)],r,90).changes).toEqual([]);
+  });
+  it('treats any finite result other than -1 as healthy under defaults, never missing data',()=>{
+    const r=rules({failure_threshold:1,recovery_threshold:1});
+    const failed=processProbes(freshMonitor(start),[probe(1,-1)],r,90);
+    expect(processProbes(failed.state,[probe(2,null)],r,90).changes).toEqual([]);
+    expect(processProbes(failed.state,[probe(2,-2)],r,90).changes[0].recovered).toBe(true);
+    expect(rules({recovery_delay_ms:''}).recoveryMs).toBeNull();
+    expect(rules({recovery_delay_ms:'不限'}).recoveryMs).toBeNull();
   });
 });

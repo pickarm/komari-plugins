@@ -1,6 +1,6 @@
 {
   "name": "komari-plugin-ping-alert",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "private": true,
   "description": "Consecutive Ping failure and recovery alerts for Komari",
   "scripts": {

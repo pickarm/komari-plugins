@@ -11,7 +11,7 @@
     "zh-CN": "探测/丢包检测按需报告；中文通知排版、模板预览与模拟发送，支持日/周/月及自定义报告。",
     "en": "Selective probe/loss reporting with notification preview and simulation."
   },
-  "version": "1.2.0",
+  "version": "1.2.1",
   "entry": "script.js",
   "author": "pickarm",
   "url": "https://github.com/pickarm/komari-plugins",
@@ -88,7 +88,7 @@
         "type": "number",
         "default": 10,
         "help": {
-          "zh-CN": "默认 10 次，范围 1–1000；按实际探测结果计数，超时或开启延迟检测后的延迟超限均为异常。"
+          "zh-CN": "默认连续 10 次满足“失败延迟”定义后通知，范围 1–1000。"
         }
       },
       {
@@ -100,43 +100,31 @@
         "type": "number",
         "default": 2,
         "help": {
-          "zh-CN": "范围 1–1000；开启延迟检测后，须连续满足恢复延迟。"
+          "zh-CN": "默认连续 2 次满足“恢复延迟”定义后通知恢复，范围 1–1000。次数与延迟分别配置。"
         }
       },
       {
-        "key": "latency_enabled",
+        "key": "failure_delay_ms",
         "name": {
-          "zh-CN": "启用延迟阈值检测",
-          "en": "Enable latency thresholds"
-        },
-        "type": "switch",
-        "default": false,
-        "help": {
-          "zh-CN": "关闭时只判断超时/失败。开启后同时判断下面的延迟阈值。"
-        }
-      },
-      {
-        "key": "failure_latency_ms",
-        "name": {
-          "zh-CN": "异常延迟：大于多少毫秒",
-          "en": "Failure latency above (ms)"
+          "zh-CN": "失败延迟（毫秒）",
+          "en": "Failure delay (ms)"
         },
         "type": "number",
-        "default": 200,
+        "default": -1,
         "help": {
-          "zh-CN": "仅延迟检测开启时生效，范围 0.001–600000 ms。"
+          "zh-CN": "默认 -1：只有探测结果等于 -1 才算失败。可直接改为非负数，如 300：延迟大于 300 毫秒或结果为 -1 时算失败。无需额外开关。"
         }
       },
       {
-        "key": "recovery_latency_ms",
+        "key": "recovery_delay_ms",
         "name": {
-          "zh-CN": "恢复延迟：不高于多少毫秒",
-          "en": "Recovery latency at most (ms)"
+          "zh-CN": "恢复延迟（毫秒）",
+          "en": "Recovery delay (ms)"
         },
-        "type": "number",
-        "default": 150,
+        "type": "string",
+        "default": "不限",
         "help": {
-          "zh-CN": "范围 0–600000 ms；不能高于异常阈值，超过时自动限制。两阈值之间既不累计异常，也不累计恢复。"
+          "zh-CN": "默认填“不限”：有实际探测结果且不是 -1 即满足恢复，不设延迟上限。可直接填数字，如 300：要求结果不高于 300 毫秒，并且不满足失败条件。留空同样表示不限。"
         }
       },
       {
