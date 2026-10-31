@@ -6,15 +6,15 @@
       "short": "ping-alert",
       "category": "monitoring",
       "description": {
-        "zh-CN": "默认连续异常 10 次实际探测通知；自定义延迟和丢包率阈值，发送含平均延迟与平均丢包率的日/周/月及自定义周期报告。",
-        "en": "Probe-count, latency and packet-loss alerts with daily, weekly, monthly and custom reports of average latency and loss."
+        "zh-CN": "中文通知与模板模拟测试；按探测/丢包开关生成报告，两项关闭不报告，支持日/周/月及自定义周期。",
+        "en": "Notification previews and simulations, with reports limited to enabled probe and loss metrics."
       },
-      "version": "1.1.0",
+      "version": "1.2.0",
       "author": "pickarm",
       "komari": ">=1.6.1",
       "url": "https://github.com/pickarm/komari-plugins",
-      "download": "https://github.com/pickarm/komari-plugins/releases/download/ping-alert-v1.1.0/ping-alert-1.1.0.zip",
-      "sha256": "bb90f45a86cec606a7b6ac6faaf8c050ebffb4ae85623db61533e552ff75a010"
+      "download": "https://github.com/pickarm/komari-plugins/releases/download/ping-alert-v1.2.0/ping-alert-1.2.0.zip",
+      "sha256": "185407b864bfd0da2813413d3c492e98f2a9753481142edef1e5587f1d22c61f"
     }
   ]
 }

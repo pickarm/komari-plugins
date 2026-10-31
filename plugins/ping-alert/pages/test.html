@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>通知模拟与模板测试</title>
+<style>
+:root{color-scheme:light dark;font:15px/1.6 system-ui,sans-serif}body{max-width:1000px;margin:28px auto;padding:0 20px;background:light-dark(#f6f8fc,#101726);color:light-dark(#172033,#e5eaf5)}h1{font-size:24px;margin-bottom:4px}p{color:light-dark(#566078,#b5bfd2)}.card{background:light-dark(#fff,#1b2537);padding:22px;border:1px solid light-dark(#dce3ef,#38455b);border-radius:14px;margin:20px 0}.grid{display:grid;grid-template-columns:1fr 1fr;gap:20px}label{display:block;font-weight:600;margin-bottom:12px}input,select,textarea{box-sizing:border-box;width:100%;padding:10px;border:1px solid #8191aa;border-radius:7px;background:light-dark(#fff,#101726);color:inherit;font:inherit}textarea{min-height:135px;resize:vertical;font-family:ui-monospace,monospace}button{padding:10px 18px;border:0;border-radius:8px;font:inherit;cursor:pointer;background:#2563eb;color:#fff;margin-right:8px}button.secondary{background:light-dark(#e3eaf7,#35445b);color:inherit}button:disabled{opacity:.5;cursor:wait}pre{white-space:pre-wrap;overflow-wrap:anywhere;font:15px/1.8 system-ui,sans-serif;margin:0}#status{white-space:pre-wrap}small{font-weight:400;color:light-dark(#66718a,#b5bfd2)}@media(max-width:650px){.grid{grid-template-columns:1fr}body{margin:14px auto}}
+</style></head><body>
+<h1>通知模拟与模板测试</h1>
+<p>先预览，再按需发送模拟消息。所有内容均标注“模拟”，不会改变真实故障、探测计数或报告计划。</p>
+<div id="status" role="status" aria-live="polite">正在加载已保存的设置…</div>
+<section class="card"><div class="grid">
+<label>模拟类型<select id="type"><option value="ping-failure">探测异常</option><option value="ping-recovery">探测恢复</option><option value="loss-failure">丢包率异常</option><option value="loss-recovery">丢包率恢复</option><option value="report">周期报告</option></select></label>
+<div><small>只测试已开启的检测项。周期报告仅展示已开启的探测/丢包率；两项都关闭时不生成。</small></div>
+<label>模拟延迟（毫秒，-1 表示超时）<input id="latency" type="number" min="-1" max="600000" value="250"></label>
+<label>模拟丢包率（%）<input id="loss" type="number" min="0" max="100" step="0.1" value="25"></label>
+</div>
+<p>以下模板修改仅用于本次测试，不会覆盖插件已保存的模板。确认效果后可复制回插件设置。留空使用默认中文消息。</p>
+<label>故障模板<textarea id="failure_template" placeholder="留空使用默认内容"></textarea></label>
+<label>恢复模板<textarea id="recovery_template" placeholder="留空使用默认内容"></textarea></label>
+<label>报告模板<textarea id="report_template" placeholder="留空仅报告已开启的检测项"></textarea></label>
+<small>告警占位符：{{task}} {{node}} {{target}} {{count}} {{latency}} {{loss}} {{time}} {{event}} {{message}}。报告占位符：{{start}} {{end}} {{latency}} {{loss}} {{nodes}} {{count}} {{event}} {{message}}。</small>
+<p><button id="preview">预览最终消息</button><button id="send" class="secondary">发送模拟通知</button><button id="reset" class="secondary">重新读取已保存模板</button></p>
+</section>
+<section class="card"><h2>消息预览</h2><p id="channel">预览会包含 Komari 全局通知模板，Telegram 渠道还会添加标题。</p><pre id="output">点击“预览最终消息”查看效果。</pre><details><summary>查看渠道格式</summary><pre id="raw"></pre></details><details><summary>标题或外层字段仍然重复？</summary><p>顶部标题由渠道添加，“事件 / 服务器 / 消息 / 时间”来自 Komari 全局通知模板。插件会整理正文，但不会自动覆盖全局模板。若希望只发送正文，可自行将全局模板改为 <code>{{message}}</code>；这个修改会影响其他插件和系统通知，请先预览确认。</p></details></section>
+<script>
+const $=id=>document.getElementById(id),keys=['failure_template','recovery_template','report_template'];let busy=false;
+async function load(){try{const r=await fetch('/api/plugins/ping-alert/test/context',{credentials:'same-origin'}),d=await r.json();if(!r.ok)throw Error(d.error||'加载失败');keys.forEach(k=>$(k).value=d.templates[k]||'');for(const o of $('type').options)o.disabled=o.value.startsWith('ping')?!d.ping:o.value.startsWith('loss')?!d.loss:!d.ping&&!d.loss;const first=[...$('type').options].find(o=>!o.disabled);if(first)$('type').value=first.value;$('status').textContent=`探测检测：${d.ping?'已开启':'未开启'}；丢包率检测：${d.loss?'已开启':'未开启'}。此页面不会保存模板。`;}catch(e){$('status').textContent=e.message;}}
+async function run(action){if(busy)return;busy=true;document.querySelectorAll('button').forEach(b=>b.disabled=true);$('status').textContent=action==='send'?'正在发送模拟消息…':'正在生成预览…';try{const templates={};keys.forEach(k=>templates[k]=$(k).value);const r=await fetch('/api/plugins/ping-alert/test/'+action,{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json','X-Ping-Alert-Test':'1'},body:JSON.stringify({type:$('type').value,latency:Number($('latency').value),loss:Number($('loss').value),templates})});const d=await r.json();if(!r.ok)throw Error(d.error||'操作失败');$('output').textContent=d.preview;$('raw').textContent=d.raw;$('channel').textContent=`渠道：${d.channel==='telegram'?'Telegram':d.channel}。${d.note}`;$('status').textContent=d.sent?'模拟通知已提交给通知渠道，请检查接收端。':d.ready?'预览已生成；尚未发送。':'预览已生成，但全局通知未开启或尚未选择渠道。';}catch(e){$('status').textContent=e.message;}finally{busy=false;document.querySelectorAll('button').forEach(b=>b.disabled=false);}}
+$('preview').onclick=()=>run('preview');$('send').onclick=()=>run('send');$('reset').onclick=load;load();
+</script></body></html>

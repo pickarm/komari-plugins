@@ -11,6 +11,7 @@ export function rules(c: Config) {
   const failureMs = number(c.failure_latency_ms, 200, 0.001, 600000);
   const lossHigh = number(c.loss_failure_percent, 20, 0.001, 100);
   return {
+    pingEnabled: bool(c.enabled,true),
     failureCount: integer(c.failure_threshold, 10, 1, 1000),
     recoveryCount: integer(c.recovery_threshold, 2, 1, 1000),
     latencyEnabled: bool(c.latency_enabled, false), failureMs,

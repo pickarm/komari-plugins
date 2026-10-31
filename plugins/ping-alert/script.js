@@ -454,6 +454,7 @@
     const failureMs = number(c.failure_latency_ms, 200, 1e-3, 6e5);
     const lossHigh = number(c.loss_failure_percent, 20, 1e-3, 100);
     return {
+      pingEnabled: bool(c.enabled, true),
       failureCount: integer(c.failure_threshold, 10, 1, 1e3),
       recoveryCount: integer(c.recovery_threshold, 2, 1, 1e3),
       latencyEnabled: bool(c.latency_enabled, false),
@@ -507,13 +508,14 @@
       state2.window.push(timeout ? 1 : 0);
       state2.window = state2.window.slice(-r.lossWindow);
       const loss = state2.window.length === r.lossWindow ? state2.window.reduce((a, b) => a + b, 0) / r.lossWindow * 100 : null;
-      const pingChange = advance(
+      const pingChange = r.pingEnabled ? advance(
         state2.ping,
         timeout || r.latencyEnabled && p.value > r.failureMs,
         !timeout && (!r.latencyEnabled || p.value <= r.recoveryMs),
         r.failureCount,
         r.recoveryCount
-      );
+      ) : null;
+      if (!r.pingEnabled) state2.ping = { active: false, bad: 0, good: 0 };
       if (pingChange !== null) changes.push({
         rule: "ping",
         recovered: pingChange,
@@ -584,6 +586,46 @@
   var latencyText = (v) => typeof v === "number" && Number.isFinite(v) && v >= 0 ? `${v.toFixed(2)} ms` : "\u65E0\u6210\u529F\u91C7\u6837";
   var lossText = (v) => v === null ? "\u65E0\u6570\u636E" : `${v.toFixed(2)}%`;
 
+  // src/notifications.ts
+  var reportMetrics = (c) => ({ ping: bool(c.enabled, true), loss: bool(c.loss_enabled, false) });
+  var metricKey = (c) => {
+    const f = reportMetrics(c);
+    return `${f.ping ? "p" : ""}${f.loss ? "l" : ""}`;
+  };
+  var htmlEscape = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  function plainText(s) {
+    return s.replace(/\r\n?/g, "\n").replace(/<br\s*\/?\s*>/gi, "\n").replace(/<\/(?:p|div|li|h[1-6]|blockquote)>/gi, "\n").replace(/<\/?(?:p|div|li|ul|ol|h[1-6]|blockquote|strong|b|em|i|u|s|span|pre|code|a)(?:\s[^>]*?)?>/gi, "").replace(/&nbsp;/gi, " ").replace(/&lt;/gi, "<").replace(/&gt;/gi, ">").replace(/&quot;/gi, '"').replace(/&#39;/gi, "'").replace(/&amp;/gi, "&").replace(/\n[ \t]+/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+  }
+  function localTime(iso, c) {
+    const offset = number(c.notice_utc_offset, 8, -12, 14), d = new Date(Date.parse(iso) + offset * 36e5);
+    const pad = (n) => String(n).padStart(2, "0");
+    return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}\uFF08UTC${offset >= 0 ? "+" : ""}${offset}\uFF09`;
+  }
+  function prepareNotice(event, settings) {
+    const outer = str(settings.notification_template, "{{emoji}}{{emoji}}{{emoji}}\nEvent: {{event}}\nClients: {{client}}\nMessage: {{message}}\nTime: {{time}}");
+    const telegram = str(settings.notification_method) === "telegram";
+    let body = event.message.replace(/\r\n?/g, "\n").trim();
+    if (outer.includes("{{event}}") || telegram) {
+      if (body.startsWith(event.event + "\n")) body = body.slice(event.event.length + 1);
+    }
+    if (event.clients?.length && /\{\{clients?\}\}/.test(outer)) body = body.split("\n").filter((l) => !l.startsWith("\u8282\u70B9\uFF1A")).join("\n");
+    if (outer.includes("{{time}}")) body = body.split("\n").filter((l) => !l.startsWith("\u63A2\u6D4B\u65F6\u95F4\uFF1A") && !l.startsWith("\u901A\u77E5\u65F6\u95F4\uFF1A")).join("\n");
+    const payload = { ...event, message: telegram ? htmlEscape(body) : body };
+    const d = new Date(event.time), pad = (n) => String(n).padStart(2, "0");
+    const time = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+    const values = { emoji: event.emoji, event: event.event, client: event.clientLabel || "", clients: event.clientLabel || "", message: payload.message, time };
+    const rendered = outer.replace(/\{\{(emoji|event|clients?|message|time)\}\}/g, (_, k) => values[k]);
+    const wire = telegram ? `<b>${htmlEscape(event.event)}</b>
+${rendered}` : rendered;
+    return {
+      payload,
+      preview: plainText(wire),
+      raw: wire,
+      channel: str(settings.notification_method, "none"),
+      ready: bool(settings.notification_enabled, false) && !["", "none"].includes(str(settings.notification_method, "none"))
+    };
+  }
+
   // src/plugin.ts
   var fs = __require("fs");
   var stateFile = `${__storageDir__}/state-v2.json`;
@@ -637,9 +679,13 @@
         blocked.add(p.scope);
         continue;
       }
-      if (p.scope.startsWith("alert:") && !bool(c.enabled, true) || p.scope.startsWith("report:") && !bool(c[`${p.scope.slice(7)}_enabled`], false)) continue;
+      if (p.scope.startsWith("alert:") && !(p.scope.endsWith(":loss") ? bool(c.loss_enabled, false) : bool(c.enabled, true)) || p.scope.startsWith("report:") && (!bool(c[`${p.scope.slice(7)}_enabled`], false) || !metricKey(c) || p.payload.metrics !== metricKey(c))) {
+        state.pending = state.pending.filter((item) => item.id !== p.id);
+        save();
+        continue;
+      }
       try {
-        await import_plugin_sdk.server.call("admin:sendNotification", { event: p.payload });
+        await deliver(p.payload);
         state.pending = state.pending.filter((item) => item.id !== p.id);
       } catch (e) {
         p.attempts++;
@@ -662,17 +708,18 @@
     })).filter((t) => t.clients.length) };
   }
   function alertEvent(change, task, uuid, nodes, c) {
-    const event = change.rule === "ping" ? change.recovered ? "PingRecovery" : "PingFailure" : change.recovered ? "PingLossRecovery" : "PingLossFailure";
-    const title = `${change.rule === "ping" ? "Ping \u63A2\u6D4B" : "Ping \u4E22\u5305\u7387"}${change.recovered ? "\u6062\u590D" : "\u5F02\u5E38"}`;
+    const code = change.rule === "ping" ? change.recovered ? "PingRecovery" : "PingFailure" : change.recovered ? "PingLossRecovery" : "PingLossFailure";
+    const event = `${change.rule === "ping" ? "\u63A2\u6D4B" : "\u4E22\u5305\u7387"}${change.recovered ? "\u6062\u590D" : "\u5F02\u5E38"}`;
+    const flags = reportMetrics(c);
     const message = [
-      title,
+      event,
       `\u4EFB\u52A1\uFF1A${task.name || task.id}`,
       `\u8282\u70B9\uFF1A${nodes[uuid]?.name || uuid}`,
       `\u76EE\u6807\uFF1A${task.target || "-"}`,
       `\u8FDE\u7EED${change.recovered ? "\u6062\u590D" : "\u5F02\u5E38"}\u63A2\u6D4B\uFF1A${change.count} \u6B21`,
-      `\u672C\u6B21\u5EF6\u8FDF\uFF1A${change.latency < 0 ? "\u8D85\u65F6/\u5931\u8D25" : latencyText(change.latency)}`,
-      `\u6700\u8FD1 ${rules(c).lossWindow} \u6B21\u4E22\u5305\u7387\uFF1A${lossText(change.lossPercent)}`,
-      `\u63A2\u6D4B\u65F6\u95F4\uFF1A${change.time}`
+      ...flags.ping ? [`\u672C\u6B21\u5EF6\u8FDF\uFF1A${change.latency < 0 ? "\u8D85\u65F6/\u5931\u8D25" : latencyText(change.latency)}`] : [],
+      ...flags.loss ? [`\u6700\u8FD1 ${rules(c).lossWindow} \u6B21\u4E22\u5305\u7387\uFF1A${lossText(change.lossPercent)}`] : [],
+      `\u63A2\u6D4B\u65F6\u95F4\uFF1A${localTime(change.time, c)}`
     ].join("\n");
     const values = {
       task: task.name || String(task.id),
@@ -683,24 +730,38 @@
       count: String(change.count),
       latency: change.latency < 0 ? "\u8D85\u65F6/\u5931\u8D25" : latencyText(change.latency),
       loss: lossText(change.lossPercent),
-      time: change.time,
+      time: localTime(change.time, c),
       event,
+      event_code: code,
       message
     };
     const template = str(change.recovered ? c.recovery_template : c.failure_template);
     return {
       event,
+      code,
       emoji: change.recovered ? "\u2705" : "\u{1F6A8}",
       time: change.time,
       clients: [{ uuid }],
-      message: template.trim() ? template.replace(/\{\{(\w+)\}\}/g, (m, k) => values[k] ?? m) : message
+      clientLabel: nodes[uuid]?.name || uuid,
+      message: template.trim() ? plainText(template).replace(/\{\{(\w+)\}\}/g, (m, k) => values[k] ?? m) : message
     };
+  }
+  async function deliveryPreview(payload) {
+    const s = await import_plugin_sdk.server.call("admin:getSettings");
+    return prepareNotice(payload, { notification_method: s.notification_method, notification_template: s.notification_template, notification_enabled: s.notification_enabled });
+  }
+  async function deliver(payload) {
+    const prepared = await deliveryPreview(payload);
+    if (!prepared.ready) throw new Error("\u8BF7\u5148\u5F00\u542F Komari \u901A\u77E5\u5E76\u9009\u62E9\u901A\u77E5\u6E20\u9053");
+    await import_plugin_sdk.server.call("admin:sendNotification", { event: prepared.payload });
   }
   async function poll() {
     const c = await import_plugin_sdk.server.getConfig();
-    if (!bool(c.enabled, true)) {
+    if (!metricKey(c)) {
+      state.entries = {};
+      state.requests = [];
       await flush(c);
-      await drainReports();
+      save();
       return;
     }
     const r = rules(c), selected = await scope(c), active = /* @__PURE__ */ new Set();
@@ -742,7 +803,7 @@
       }
     }
     for (const key of Object.keys(state.entries)) if (!active.has(key)) delete state.entries[key];
-    state.pending = state.pending.filter((p) => !p.scope.startsWith("alert:") || active.has(p.scope.split(":").slice(1, 3).join(":")) && (!p.scope.endsWith(":loss") || r.lossEnabled));
+    state.pending = state.pending.filter((p) => !p.scope.startsWith("alert:") || active.has(p.scope.split(":").slice(1, 3).join(":")) && (p.scope.endsWith(":loss") ? r.lossEnabled : r.pingEnabled));
     save();
     await flush(c);
     await drainReports();
@@ -750,12 +811,12 @@
   async function report(request) {
     const { kind } = request;
     const c = await import_plugin_sdk.server.getConfig();
-    if (!bool(c[`${kind}_enabled`], false)) return;
+    if (!bool(c[`${kind}_enabled`], false) || !metricKey(c)) return;
     const start = new Date(request.start), end = new Date(request.end);
     const rangeKey = `${start.toISOString()}/${end.toISOString()}`;
     if (state.reports[kind] === rangeKey) return;
     const { tasks, nodes } = await scope(c);
-    const lines = [], allStats = [];
+    const allStats = [];
     for (const task of tasks) {
       const response = await import_plugin_sdk.server.call("public:getPingMetricStats", {
         entity_ids: task.clients,
@@ -766,28 +827,65 @@
       });
       const matching = response.stats.filter((s) => String(s.task_id) === String(task.id) && task.clients.includes(s.entity_id));
       allStats.push(...matching);
-      for (const uuid of task.clients) {
-        const stat = matching.find((s) => s.entity_id === uuid);
-        lines.push(`${task.name || task.id} / ${nodes[uuid]?.name || uuid}\uFF1A${stat && stat.total > 0 ? `\u5E73\u5747\u5EF6\u8FDF ${latencyText(stat.avg)}\uFF0C\u5E73\u5747\u4E22\u5305\u7387 ${lossText(stat.loss)}${stat.loss_approximate ? "\uFF08\u4F30\u7B97\uFF09" : ""}\uFF0C${stat.total} \u6B21\u63A2\u6D4B` : "\u65E0\u6570\u636E"}`);
-      }
     }
-    const totals = summarize(allStats);
-    const label = { daily: "\u65E5\u62A5", weekly: "\u5468\u62A5", monthly: "\u6708\u62A5", custom: "\u81EA\u5B9A\u4E49\u5468\u671F\u62A5\u544A" }[kind];
-    const event = `Ping${kind[0].toUpperCase()}${kind.slice(1)}Report`;
-    const message = [
-      `Ping ${label}`,
-      `${start.toISOString()} \u81F3 ${end.toISOString()}\uFF08\u4E0D\u542B\u7EC8\u70B9\uFF09`,
-      `\u603B\u4F53\u5E73\u5747\u5EF6\u8FDF\uFF1A${totals.total ? latencyText(totals.averageLatency) : "\u65E0\u6570\u636E"}`,
-      `\u603B\u4F53\u5E73\u5747\u4E22\u5305\u7387\uFF1A${lossText(totals.averageLoss)}${totals.approximate ? "\uFF08\u542B\u4F30\u7B97\uFF09" : ""}`,
-      `\u5B9E\u9645\u63A2\u6D4B\u603B\u6570\uFF1A${totals.total}`,
-      ...lines,
-      "\u7EDF\u8BA1\u6E90\uFF1AKomari \u5386\u53F2\u805A\u5408\u6570\u636E\uFF1B\u7F3A\u62A5\u4E0D\u8BA1\u4E3A\u4E22\u5305\uFF0C\u4FDD\u5B58\u671F\u4E0D\u8DB3\u65F6\u53EA\u8986\u76D6\u73B0\u5B58\u6570\u636E\u3002"
-    ].join("\n");
+    const payload = reportEvent(c, kind, start, end, tasks, nodes, allStats);
+    if (!payload) return;
     const id = `report:${kind}:${rangeKey}`;
-    put(id, `report:${kind}`, { event, message, emoji: "\u{1F4CA}", time: (/* @__PURE__ */ new Date()).toISOString() });
+    put(id, `report:${kind}`, payload);
     state.reports[kind] = rangeKey;
     save();
     await flush(c);
+  }
+  function reportEvent(c, kind, start, end, tasks, nodes, allStats) {
+    const flags = reportMetrics(c);
+    if (!flags.ping && !flags.loss) return null;
+    const totals = summarize(allStats), lines = [];
+    for (const task of tasks) for (const uuid of task.clients ?? []) {
+      const stat = allStats.find((s) => String(s.task_id) === String(task.id) && s.entity_id === uuid);
+      const metrics = stat && stat.total > 0 ? [
+        ...flags.ping ? [`\u5E73\u5747\u5EF6\u8FDF\uFF1A${latencyText(stat.avg)}`] : [],
+        ...flags.loss ? [`\u5E73\u5747\u4E22\u5305\u7387\uFF1A${lossText(stat.loss)}${stat.loss_approximate ? "\uFF08\u4F30\u7B97\uFF09" : ""}`] : [],
+        `\u5B9E\u9645\u63A2\u6D4B\uFF1A${stat.total} \u6B21`
+      ] : ["\u65E0\u6570\u636E"];
+      lines.push(`\u4EFB\u52A1\uFF1A${task.name || task.id}
+\u8282\u70B9\uFF1A${nodes[uuid]?.name || uuid}
+${metrics.join("\n")}`);
+    }
+    const label = { daily: "\u65E5\u62A5", weekly: "\u5468\u62A5", monthly: "\u6708\u62A5", custom: "\u81EA\u5B9A\u4E49\u5468\u671F\u62A5\u544A" }[kind];
+    const event = `\u63A2\u6D4B${label}`, code = `Ping${kind[0].toUpperCase()}${kind.slice(1)}Report`;
+    const message = [
+      event,
+      `\u7EDF\u8BA1\u5F00\u59CB\uFF1A${localTime(start.toISOString(), c)}`,
+      `\u7EDF\u8BA1\u7ED3\u675F\uFF1A${localTime(end.toISOString(), c)}\uFF08\u4E0D\u542B\u7EC8\u70B9\uFF09`,
+      "",
+      ...flags.ping ? [`\u603B\u4F53\u5E73\u5747\u5EF6\u8FDF\uFF1A${totals.total ? latencyText(totals.averageLatency) : "\u65E0\u6570\u636E"}`] : [],
+      ...flags.loss ? [`\u603B\u4F53\u5E73\u5747\u4E22\u5305\u7387\uFF1A${lossText(totals.averageLoss)}${totals.approximate ? "\uFF08\u542B\u4F30\u7B97\uFF09" : ""}`] : [],
+      `\u5B9E\u9645\u63A2\u6D4B\u603B\u6570\uFF1A${totals.total}`,
+      "",
+      lines.join("\n\n"),
+      "",
+      flags.loss ? "\u6CE8\uFF1A\u4EC5\u7EDF\u8BA1\u73B0\u5B58\u63A2\u6D4B\u8BB0\u5F55\uFF0C\u7F3A\u62A5\u4E0D\u8BA1\u5165\u4E22\u5305\u3002" : "\u6CE8\uFF1A\u4EC5\u7EDF\u8BA1\u73B0\u5B58\u63A2\u6D4B\u8BB0\u5F55\u3002"
+    ].join("\n");
+    const template = plainText(str(c.report_template));
+    const values = {
+      event,
+      event_code: code,
+      message,
+      start: localTime(start.toISOString(), c),
+      end: localTime(end.toISOString(), c),
+      latency: flags.ping ? totals.total ? latencyText(totals.averageLatency) : "\u65E0\u6570\u636E" : "",
+      loss: flags.loss ? lossText(totals.averageLoss) : "",
+      nodes: lines.join("\n\n"),
+      count: String(totals.total)
+    };
+    return {
+      event,
+      code,
+      emoji: "\u{1F4CA}",
+      time: (/* @__PURE__ */ new Date()).toISOString(),
+      metrics: metricKey(c),
+      message: template ? template.replace(/\{\{(\w+)\}\}/g, (m, k) => values[k] ?? m) : message
+    };
   }
   async function drainReports() {
     const request = state.requests.find((r) => r.next <= Date.now());
@@ -804,7 +902,7 @@
   }
   async function requestReport(kind) {
     const c = await import_plugin_sdk.server.getConfig();
-    if (!bool(c[`${kind}_enabled`], false)) return;
+    if (!bool(c[`${kind}_enabled`], false) || !metricKey(c)) return;
     const { start, end } = reportRange(kind, /* @__PURE__ */ new Date(), number(c.custom_hours, 6, 0.05, 8760));
     const startText = start.toISOString(), endText = end.toISOString();
     if (state.reports[kind] === `${startText}/${endText}` || state.requests.some((r) => r.kind === kind && r.start === startText && r.end === endText)) return;
@@ -813,12 +911,137 @@
     save();
     await drainReports();
   }
+  var lastTestSent = 0;
+  var testSending = false;
+  function header(req, name) {
+    const key = Object.keys(req.headers).find((k) => k.toLowerCase() === name);
+    const v = key ? req.headers[key] : "";
+    return Array.isArray(v) ? v[0] : v || "";
+  }
+  function reply(res, status, data) {
+    res.statusCode = status;
+    res.setHeader("Content-Type", "application/json; charset=utf-8");
+    res.setHeader("Cache-Control", "no-store");
+    res.end(JSON.stringify(data));
+  }
+  function isAdmin(req) {
+    return req.context?.principal?.roles?.includes("admin") === true;
+  }
+  async function simulation(c, input) {
+    const type = str(input.type, "ping-failure");
+    const allowed = ["ping-failure", "ping-recovery", "loss-failure", "loss-recovery", "report"];
+    if (!allowed.includes(type)) throw new Error("\u8BF7\u9009\u62E9\u6709\u6548\u7684\u6A21\u62DF\u7C7B\u578B");
+    if (type.startsWith("ping") && !bool(c.enabled, true)) throw new Error("\u8BF7\u5148\u5F00\u542F\u63A2\u6D4B\u68C0\u6D4B\uFF0C\u518D\u6A21\u62DF\u63A2\u6D4B\u901A\u77E5");
+    if (type.startsWith("loss") && !bool(c.loss_enabled, false)) throw new Error("\u8BF7\u5148\u5F00\u542F\u4E22\u5305\u7387\u68C0\u6D4B\uFF0C\u518D\u6A21\u62DF\u4E22\u5305\u901A\u77E5");
+    const templates = input.templates && typeof input.templates === "object" ? input.templates : {};
+    const config = { ...c };
+    for (const k of ["failure_template", "recovery_template", "report_template"]) {
+      if (typeof templates[k] === "string") {
+        if (templates[k].length > 8e3) throw new Error("\u6A21\u677F\u8FC7\u957F\uFF0C\u6700\u591A 8000 \u5B57\u7B26");
+        config[k] = templates[k];
+      }
+    }
+    const selected = await scope(c), task = selected.tasks[0] || { id: 0, name: "\u6A21\u62DF\u4EFB\u52A1", target: "example.com", clients: ["simulation"] };
+    const uuid = task.clients?.[0] || "simulation", nodes = selected.nodes;
+    const now = /* @__PURE__ */ new Date(), r = rules(c);
+    let event;
+    if (type === "report") {
+      const payload = reportEvent(
+        config,
+        "custom",
+        new Date(now.getTime() - 36e5),
+        now,
+        [task],
+        { ...nodes, [uuid]: nodes[uuid] || { name: "\u6A21\u62DF\u8282\u70B9" } },
+        [{ entity_id: uuid, task_id: String(task.id), total: 100, valid: 100 - number(input.loss, 5, 0, 100), avg: number(input.latency, 45, 0, 6e5), loss: number(input.loss, 5, 0, 100) }]
+      );
+      if (!payload) throw new Error("\u63A2\u6D4B\u68C0\u6D4B\u548C\u4E22\u5305\u7387\u68C0\u6D4B\u5747\u672A\u5F00\u542F\uFF0C\u4E0D\u751F\u6210\u62A5\u544A");
+      event = payload;
+    } else event = alertEvent({
+      rule: type.startsWith("loss") ? "loss" : "ping",
+      recovered: type.endsWith("recovery"),
+      time: now.toISOString(),
+      count: type.startsWith("loss") ? type.endsWith("recovery") ? r.lossRecoveryCount : r.lossFailureCount : type.endsWith("recovery") ? r.recoveryCount : r.failureCount,
+      latency: number(input.latency, type.endsWith("recovery") ? 50 : 250, -1, 6e5),
+      lossPercent: number(input.loss, type.endsWith("recovery") ? 0 : 25, 0, 100)
+    }, task, uuid, { ...nodes, [uuid]: nodes[uuid] || { name: "\u6A21\u62DF\u8282\u70B9" } }, config);
+    const originalTitle = event.event;
+    event.event = `\u3010\u6A21\u62DF\u3011${originalTitle}`;
+    event.message = `\u3010\u6A21\u62DF\u901A\u77E5\uFF0C\u4E0D\u4EE3\u8868\u771F\u5B9E\u6545\u969C\u3011
+${event.message.startsWith(originalTitle + "\n") ? event.message.slice(originalTitle.length + 1) : event.message}`;
+    if (!selected.nodes[uuid]) event.clients = void 0;
+    return event;
+  }
+  function registerTestRoutes() {
+    import_plugin_sdk.server.route("GET", "/api/plugins/ping-alert/test/context", async (req, res) => {
+      if (!isAdmin(req)) {
+        reply(res, 403, { error: "\u4EC5\u7BA1\u7406\u5458\u53EF\u8BBF\u95EE" });
+        return;
+      }
+      const c = await import_plugin_sdk.server.getConfig();
+      reply(res, 200, {
+        ping: bool(c.enabled, true),
+        loss: bool(c.loss_enabled, false),
+        templates: { failure_template: str(c.failure_template), recovery_template: str(c.recovery_template), report_template: str(c.report_template) }
+      });
+    });
+    for (const action of ["preview", "send"]) import_plugin_sdk.server.route("POST", `/api/plugins/ping-alert/test/${action}`, async (req, res) => {
+      if (!isAdmin(req)) {
+        reply(res, 403, { error: "\u4EC5\u7BA1\u7406\u5458\u53EF\u8BBF\u95EE" });
+        return;
+      }
+      if (header(req, "x-ping-alert-test") !== "1" || !header(req, "content-type").toLowerCase().startsWith("application/json")) {
+        reply(res, 403, { error: "\u8BF7\u6C42\u6765\u6E90\u6821\u9A8C\u5931\u8D25" });
+        return;
+      }
+      const origin = header(req, "origin");
+      if (origin && header(req, "sec-fetch-site") !== "same-origin") {
+        reply(res, 403, { error: "\u4E0D\u5141\u8BB8\u8DE8\u7AD9\u6D4B\u8BD5\u8BF7\u6C42" });
+        return;
+      }
+      if (req.body.length > 32768) {
+        reply(res, 413, { error: "\u8BF7\u6C42\u5185\u5BB9\u8FC7\u957F" });
+        return;
+      }
+      let ownsLock = false;
+      try {
+        const c = await import_plugin_sdk.server.getConfig(), payload = await simulation(c, JSON.parse(req.body)), prepared = await deliveryPreview(payload);
+        if (action === "send") {
+          if (testSending || Date.now() - lastTestSent < 1e4) {
+            reply(res, 429, { error: "\u8BF7\u95F4\u9694\u81F3\u5C11 10 \u79D2\u518D\u53D1\u9001\u6A21\u62DF\u901A\u77E5" });
+            return;
+          }
+          if (!prepared.ready) {
+            reply(res, 400, { error: "\u8BF7\u5148\u5F00\u542F Komari \u901A\u77E5\u5E76\u9009\u62E9\u901A\u77E5\u6E20\u9053" });
+            return;
+          }
+          testSending = true;
+          ownsLock = true;
+          await import_plugin_sdk.server.call("admin:sendNotification", { event: prepared.payload });
+          lastTestSent = Date.now();
+        }
+        reply(res, 200, {
+          preview: prepared.preview,
+          raw: prepared.raw,
+          channel: prepared.channel,
+          ready: prepared.ready,
+          sent: action === "send",
+          note: "\u9884\u89C8\u5305\u542B\u7CFB\u7EDF\u5168\u5C40\u6A21\u677F\u4E0E Telegram \u6807\u9898\uFF1B\u6700\u7EC8\u5BA2\u6237\u7AEF\u5B57\u4F53\u53CA\u81EA\u52A8\u94FE\u63A5\u7531\u901A\u77E5\u6E20\u9053\u51B3\u5B9A\u3002\u6D4B\u8BD5\u5931\u8D25\u4E0D\u4F1A\u81EA\u52A8\u91CD\u8BD5\u3002"
+        });
+      } catch (e) {
+        reply(res, 400, { error: String(e instanceof Error ? e.message : e) });
+      } finally {
+        if (ownsLock) testSending = false;
+      }
+    });
+  }
   (0, import_plugin_sdk.definePlugin)({
     async load() {
       sessionStart = (/* @__PURE__ */ new Date()).toISOString();
       state = readState();
       for (const [key, old] of Object.entries(state.entries)) state.entries[key] = freshMonitor(sessionStart, old);
       save();
+      registerTestRoutes();
       import_plugin_sdk.server.cron("@every 10s", job("poll", poll));
       const c = await import_plugin_sdk.server.getConfig();
       const schedules = { daily: "0 9 * * *", weekly: "0 9 * * 1", monthly: "0 9 1 * *", custom: "0 */6 * * *" };
