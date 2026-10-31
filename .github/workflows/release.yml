@@ -1,4 +1,4 @@
-name: Release package
+name: Release plugin package
 on:
   release:
     types: [published]
@@ -9,18 +9,29 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - id: plugin
+        name: Resolve plugin from versioned release tag
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          node -e 'const fs=require("fs");const tag=process.env.RELEASE_TAG;const match=/^([a-z0-9-]+)-v(\d+\.\d+\.\d+)$/.exec(tag);if(!match)throw Error("Use <short>-v<version> release tags");const dir="plugins/"+match[1];const m=JSON.parse(fs.readFileSync(dir+"/komari-plugin.json"));if(m.short!==match[1]||m.version!==match[2])throw Error("Tag and manifest differ");fs.appendFileSync(process.env.GITHUB_OUTPUT,"directory="+dir+"\n");'
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
-      - run: npm ci
-      - run: npm run typecheck
-      - run: npm test
-      - run: npm run check
-      - run: npm run build
-      - run: npm run pack
-      - name: Attach validated plugin ZIP
+          cache-dependency-path: ${{ steps.plugin.outputs.directory }}/package-lock.json
+      - name: Test and build selected plugin
+        working-directory: ${{ steps.plugin.outputs.directory }}
+        run: |
+          npm ci
+          npm run typecheck
+          npm test
+          npm run check
+          npm run build
+          npm run pack
+      - name: Attach validated ZIP
+        working-directory: ${{ steps.plugin.outputs.directory }}
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.event.release.tag_name }}
-        run: gh release upload "$RELEASE_TAG" dist/ping-alert-*.zip
+        run: gh release upload "$RELEASE_TAG" dist/*.zip

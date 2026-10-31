@@ -1,0 +1,20 @@
+{
+  "schema": 1,
+  "plugins": [
+    {
+      "name": { "zh-CN": "Ping 失败告警", "en": "Ping Failure Alerts" },
+      "short": "ping-alert",
+      "category": "monitoring",
+      "description": {
+        "zh-CN": "默认连续失败 10 次通知；可自定义阈值、恢复通知、任务与节点范围、检查频率和消息模板。",
+        "en": "Alerts after 10 failed probes by default, with configurable thresholds, recovery, scope, polling and templates."
+      },
+      "version": "1.0.0",
+      "author": "pickarm",
+      "komari": ">=1.6.1",
+      "url": "https://github.com/pickarm/komari-plugins",
+      "download": "https://github.com/pickarm/komari-plugins/releases/download/v1.0.0/ping-alert-1.0.0.zip",
+      "sha256": "51abb38a1f0d860de1c38155601f826da302b9a3eab3c4e238484398f566c2c0"
+    }
+  ]
+}

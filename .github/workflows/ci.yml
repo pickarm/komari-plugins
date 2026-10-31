@@ -1,18 +1,34 @@
-name: CI
-
-on:
-  push:
-  pull_request:
-
+name: Plugin collection CI
+on: [push, pull_request]
+permissions:
+  contents: read
 jobs:
-  test:
+  discover:
     runs-on: ubuntu-latest
+    outputs:
+      plugins: ${{ steps.plugins.outputs.plugins }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: plugins
+        run: |
+          node -e 'const fs=require("fs");const dirs=fs.readdirSync("plugins").filter(p=>fs.existsSync("plugins/"+p+"/package-lock.json"));fs.appendFileSync(process.env.GITHUB_OUTPUT,"plugins="+JSON.stringify(dirs)+"\n");'
+      - run: node scripts/check-catalog.mjs
+  test:
+    needs: discover
+    strategy:
+      matrix:
+        plugin: ${{ fromJSON(needs.discover.outputs.plugins) }}
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: plugins/${{ matrix.plugin }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
+          cache-dependency-path: plugins/${{ matrix.plugin }}/package-lock.json
       - run: npm ci
       - run: npm run typecheck
       - run: npm test

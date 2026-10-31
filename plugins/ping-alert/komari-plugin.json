@@ -16,7 +16,7 @@
   "version": "1.0.0",
   "entry": "script.js",
   "author": "pickarm",
-  "url": "https://github.com/pickarm/komari-ping-alert",
+  "url": "https://github.com/pickarm/komari-plugins",
   "permissions": {
     "node": true,
     "allowSystemRPC": true,
