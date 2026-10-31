@@ -8,17 +8,19 @@
   "icon": "assets/ping-alert-icon.svg",
   "komari": ">=1.6.1",
   "description": {
-    "zh-CN": "按探测次数告警，自定义延迟与丢包率阈值，发送日报、周报、月报与自定义周期报告。",
-    "en": "Probe-count, latency and packet-loss alerts, plus daily, weekly, monthly and custom reports."
+    "zh-CN": "探测/丢包检测按需报告；中文通知排版、模板预览与模拟发送，支持日/周/月及自定义报告。",
+    "en": "Selective probe/loss reporting with notification preview and simulation."
   },
-  "version": "1.1.0",
+  "version": "1.2.0",
   "entry": "script.js",
   "author": "pickarm",
   "url": "https://github.com/pickarm/komari-plugins",
   "permissions": {
     "node": true,
     "allowSystemRPC": true,
-    "timeout": 60
+    "timeout": 60,
+    "allowRoutes": true,
+    "maxHTTPBodyBytes": 32768
   },
   "configuration": {
     "type": "managed",
@@ -26,13 +28,13 @@
       {
         "key": "enabled",
         "name": {
-          "zh-CN": "启用实时告警",
-          "en": "Enable live alerts"
+          "zh-CN": "启用探测检测",
+          "en": "Enable probe detection"
         },
         "type": "switch",
         "default": true,
         "help": {
-          "zh-CN": "关闭实时告警不影响已单独开启的报告。"
+          "zh-CN": "控制超时/延迟检测。关闭后不再报告延迟，丢包率检测可独立开启；两项均关闭时不生成任何报告。"
         }
       },
       {
@@ -146,7 +148,7 @@
         "type": "switch",
         "default": false,
         "help": {
-          "zh-CN": "独立于延迟告警；丢包指探测失败/超时，不把高延迟当作丢包。"
+          "zh-CN": "独立开关。关闭后所有默认通知和报告均不展示丢包率；缺报不当作丢包。"
         }
       },
       {
@@ -352,7 +354,42 @@
         "help": {
           "zh-CN": "范围 0.05–8760；支持小数，例如 0.5 表示最近 30 分钟。"
         }
+      },
+      {
+        "key": "report_template",
+        "name": {
+          "zh-CN": "报告通知模板",
+          "en": "Report template"
+        },
+        "type": "richtext",
+        "default": "",
+        "help": {
+          "zh-CN": "留空仅显示已开启检测项。支持 {{start}} {{end}} {{latency}} {{loss}} {{nodes}} {{count}} {{event}} {{event_code}} {{message}}。关闭项的占位符返回空；自定义文字由你自行决定。"
+        }
+      },
+      {
+        "key": "notice_utc_offset",
+        "name": {
+          "zh-CN": "通知时间时区（UTC 偏移）",
+          "en": "Notification UTC offset"
+        },
+        "type": "number",
+        "default": 8,
+        "help": {
+          "zh-CN": "默认 UTC+8，范围 -12 至 14。仅控制插件通知中的时间，报告调度仍使用服务器时区，全局模板的时间由 Komari 决定。"
+        }
       }
     ]
-  }
+  },
+  "pages": [
+    {
+      "file": "pages/test.html",
+      "title": {
+        "zh-CN": "通知模拟与模板测试",
+        "en": "Notification Simulator"
+      },
+      "visibility": "admin",
+      "type": "iframe"
+    }
+  ]
 }
