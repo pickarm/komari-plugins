@@ -524,7 +524,7 @@
     return { modules: ["routes", "unlocks"], ipv: "4", provinces: PROVINCES.map((p) => p.code), count: 30, parallel: 4, timeoutMinutes: 30 };
   }
   function defaultConfig() {
-    return { enabled: true, publicEnabled: true, defaults: defaultOptions(), retentionDays: 90, maxReportsPerNode: 100, schedules: {} };
+    return { enabled: true, publicEnabled: true, defaults: defaultOptions(), retentionDays: 90, maxReportsPerNode: 100, schedules: {}, nodeModules: {} };
   }
   function object(value, label) {
     if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`${label}\u683C\u5F0F\u4E0D\u6B63\u786E`);
@@ -552,7 +552,14 @@
   }
   function validateConfig(input) {
     const source = object(input, "\u63D2\u4EF6\u914D\u7F6E");
-    keys(source, ["enabled", "publicEnabled", "defaults", "retentionDays", "maxReportsPerNode", "schedules"]);
+    keys(source, ["enabled", "publicEnabled", "defaults", "retentionDays", "maxReportsPerNode", "schedules", "nodeModules"]);
+    const nodeSource = source.nodeModules === void 0 ? {} : object(source.nodeModules, "\u8282\u70B9\u68C0\u6D4B\u9879\u76EE"), nodeModules = {};
+    if (Object.keys(nodeSource).length > 500) throw new Error("\u8282\u70B9\u68C0\u6D4B\u914D\u7F6E\u8FC7\u591A");
+    for (const [uuid, value] of Object.entries(nodeSource)) {
+      if (!/^[a-zA-Z0-9_-]{1,100}$/.test(uuid) || ["__proto__", "prototype", "constructor"].includes(uuid)) throw new Error("\u8282\u70B9\u6807\u8BC6\u4E0D\u6B63\u786E");
+      if (!Array.isArray(value) || value.some((module) => module !== "routes" && module !== "unlocks")) throw new Error("\u8282\u70B9\u68C0\u6D4B\u9879\u76EE\u4E0D\u6B63\u786E");
+      nodeModules[uuid] = [...new Set(value)];
+    }
     const defaults = validateOptions(source.defaults), scheduleSource = object(source.schedules, "\u5B9A\u65F6\u914D\u7F6E"), schedules = {};
     if (Object.keys(scheduleSource).length > 500) throw new Error("\u5B9A\u65F6\u8282\u70B9\u8FC7\u591A");
     for (const [uuid, value] of Object.entries(scheduleSource)) {
@@ -564,7 +571,14 @@
       if (typeof entry.cron !== "string") throw new Error("Cron \u683C\u5F0F\u4E0D\u6B63\u786E");
       schedules[uuid] = { enabled: bool(entry.enabled, "\u8282\u70B9\u5B9A\u65F6"), kind: entry.kind, time: entry.time, weekday: integer(entry.weekday, 0, 6, "\u661F\u671F"), cron: validateCron(entry.cron), ...entry.options === void 0 ? {} : { options: validateOptions(entry.options, defaults) } };
     }
-    return { enabled: bool(source.enabled, "\u542F\u7528\u68C0\u6D4B"), publicEnabled: bool(source.publicEnabled, "\u516C\u5F00\u5C55\u793A"), defaults, retentionDays: integer(source.retentionDays, 1, 3650, "\u4FDD\u7559\u5929\u6570"), maxReportsPerNode: integer(source.maxReportsPerNode, 1, 1e3, "\u6BCF\u8282\u70B9\u62A5\u544A\u6570\u91CF"), schedules };
+    return { enabled: bool(source.enabled, "\u542F\u7528\u68C0\u6D4B"), publicEnabled: bool(source.publicEnabled, "\u516C\u5F00\u5C55\u793A"), defaults, retentionDays: integer(source.retentionDays, 1, 3650, "\u4FDD\u7559\u5929\u6570"), maxReportsPerNode: integer(source.maxReportsPerNode, 1, 1e3, "\u6BCF\u8282\u70B9\u62A5\u544A\u6570\u91CF"), schedules, nodeModules };
+  }
+  function optionsForNode(config, uuid, input = {}) {
+    const source = object(input, "\u68C0\u6D4B\u53C2\u6570");
+    const options = validateOptions(source, config.defaults);
+    const allowed = config.nodeModules[uuid] ?? config.defaults.modules;
+    const modules = source.modules === void 0 ? [...allowed] : options.modules.filter((module) => allowed.includes(module));
+    return modules.length ? { ...options, modules } : null;
   }
 
   // src/runner.ts
@@ -1096,6 +1110,7 @@ KOMARI_NQ_OUTER`;
     }
     async configure(input) {
       const config = validateConfig(input), nodes = await this.nodes();
+      if (Object.keys(config.nodeModules).some((uuid) => !nodes[uuid])) throw new Error("\u68C0\u6D4B\u914D\u7F6E\u5305\u542B\u4E0D\u5B58\u5728\u7684\u8282\u70B9");
       if (Object.keys(config.schedules).some((uuid) => !nodes[uuid])) throw new Error("\u5B9A\u65F6\u914D\u7F6E\u5305\u542B\u4E0D\u5B58\u5728\u7684\u8282\u70B9");
       this.state.config = config;
       this.state.lastScheduleMinute = Math.floor(this.now() / 6e4);
@@ -1116,12 +1131,17 @@ KOMARI_NQ_OUTER`;
       if (!Array.isArray(data.uuids) || !data.uuids.length || data.uuids.length > 100 || data.uuids.some((uuid) => typeof uuid !== "string")) throw new Error("\u8BF7\u9009\u62E9 1\u2013100 \u4E2A\u8282\u70B9");
       const uuids = [...new Set(data.uuids)], mode = data.mode ?? "detect";
       if (!["detect", "preflight", "prepare"].includes(String(mode))) throw new Error("\u68C0\u6D4B\u64CD\u4F5C\u4E0D\u6B63\u786E");
-      const options = validateOptions(data.options ?? {}, this.state.config.defaults), nodes = await this.nodes();
+      validateOptions(data.options ?? {}, this.state.config.defaults);
+      const nodes = await this.nodes(), eligible = [];
       for (const uuid of uuids) {
         if (!nodes[uuid]) throw new Error("\u6240\u9009\u8282\u70B9\u4E0D\u5B58\u5728");
+        const options = optionsForNode(this.state.config, uuid, data.options ?? {});
+        if (!options) continue;
         if (this.state.jobs.some((job) => job.uuid === uuid && active(job))) throw new Error(`\u8282\u70B9 ${nodes[uuid].name || uuid} \u5DF2\u6709\u6392\u961F\u6216\u8FD0\u884C\u4E2D\u7684\u4EFB\u52A1`);
+        eligible.push({ uuid, options });
       }
-      const jobs = uuids.map((uuid) => this.add(uuid, mode, options, "manual"));
+      if (!eligible.length) throw new Error("\u6240\u9009\u8282\u70B9\u5747\u672A\u542F\u7528\u68C0\u6D4B\u9879\u76EE\uFF0C\u8BF7\u5148\u52FE\u9009\u56DE\u7A0B\u6216\u6D41\u5A92\u4F53\u4E0E AI \u89E3\u9501\u68C0\u6D4B");
+      const jobs = eligible.map(({ uuid, options }) => this.add(uuid, mode, options, "manual"));
       this.save();
       return jobs;
     }
@@ -1140,6 +1160,10 @@ KOMARI_NQ_OUTER`;
       } catch (error) {
         this.finishFailure(job, `\u7ED3\u679C\u89E3\u6790\u5931\u8D25\uFF1A${message(error)}`);
         return;
+      }
+      if (job.mode === "detect") {
+        if (!job.options.modules.includes("routes")) parsed.routes = [];
+        if (!job.options.modules.includes("unlocks")) parsed.unlocks = [];
       }
       job.preflight = parsed.preflight;
       const errors = [.../* @__PURE__ */ new Set([...parsed.errors || [], ...parsed.preflight?.ok === false ? parsed.preflight.errors : []])];
@@ -1191,6 +1215,15 @@ KOMARI_NQ_OUTER`;
       }
     }
     async dispatch(job) {
+      const allowed = this.state.config.nodeModules[job.uuid] ?? this.state.config.defaults.modules;
+      job.options.modules = job.options.modules.filter((module) => allowed.includes(module));
+      if (!job.options.modules.length) {
+        job.status = "skipped";
+        job.completedAt = new Date(this.now()).toISOString();
+        job.errors = ["\u8BE5\u8282\u70B9\u7684\u68C0\u6D4B\u9879\u76EE\u5DF2\u5173\u95ED\uFF0C\u672A\u4E0B\u53D1\u4EFB\u52A1"];
+        this.save();
+        return;
+      }
       try {
         const nodes = await this.nodes(), node = nodes[job.uuid];
         if (!node) {
@@ -1245,7 +1278,10 @@ ${buildCommand(job.id, job.options, job.mode)}`;
         if (enabled) {
           const nodes = await this.nodes();
           for (const [uuid, schedule] of Object.entries(this.state.config.schedules)) {
-            if (schedule.enabled && nodes[uuid] && cronMatches(scheduleCron(schedule), this.now()) && !this.state.jobs.some((job) => job.uuid === uuid && (active(job) || job.source === "schedule" && Math.floor(Date.parse(job.createdAt) / 6e4) === minute))) this.add(uuid, "detect", validateOptions(schedule.options || {}, this.state.config.defaults), "schedule");
+            if (schedule.enabled && nodes[uuid] && cronMatches(scheduleCron(schedule), this.now()) && !this.state.jobs.some((job) => job.uuid === uuid && (active(job) || job.source === "schedule" && Math.floor(Date.parse(job.createdAt) / 6e4) === minute))) {
+              const options = optionsForNode(this.state.config, uuid, schedule.options || {});
+              if (options) this.add(uuid, "detect", options, "schedule");
+            }
           }
         }
         this.store.prune(this.state, this.now());
@@ -1319,8 +1355,9 @@ ${buildCommand(job.id, job.options, job.mode)}`;
       reply(res, 200, { config: await runtime.configure(data.config) });
     });
     route("POST", "start", async (req, res) => {
-      const jobs = await runtime.enqueue(JSON.parse(req.body));
-      reply(res, 202, { jobs });
+      const input = JSON.parse(req.body), jobs = await runtime.enqueue(input);
+      const started = new Set(jobs.map((job) => job.uuid));
+      reply(res, 202, { jobs, skipped: [...new Set(input.uuids)].filter((uuid) => !started.has(uuid)) });
     });
     route("GET", "jobs", async (req, res) => reply(res, 200, { jobs: runtime.state.jobs.filter((job) => !req.query.uuid || job.uuid === req.query.uuid) }));
     route("GET", "history", async (req, res) => reply(res, 200, { reports: runtime.history(req.query.uuid || "") }));

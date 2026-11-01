@@ -60,3 +60,11 @@ it('archives route switches in the actual VM and keeps them after restart',async
   expect((await restarted.request('public','GET',{}, {uuid:'a'},false)).data.latest.routeComparison.changes).toHaveLength(1);
   expect(restarted.commands).toEqual([]);
 });
+
+it('uses persisted node module choices inside the actual VM and blocks disabled nodes',async()=>{
+  const h=await harness();const ctx=await h.request('context');const config={...ctx.data.config,nodeModules:{a:['unlocks'],hidden:[]}};
+  expect((await h.request('config','POST',{config})).status).toBe(200);
+  const queued=await h.request('start','POST',{uuids:['a','hidden']});expect(queued.data.jobs[0].options.modules).toEqual(['unlocks']);expect(queued.data.skipped).toEqual(['hidden']);
+  await h.poll();expect(h.commands).toHaveLength(1);
+  const restarted=await harness(h.files,h.tasks);expect((await restarted.request('context')).data.config.nodeModules).toEqual({a:['unlocks'],hidden:[]});expect(restarted.commands).toEqual([]);
+});

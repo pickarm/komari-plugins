@@ -157,3 +157,54 @@ describe('route change persistence and privacy',()=>{
     expect((await request(restarted,'public',{query:{uuid:'hidden'},admin:false})).status).toBe(404);
   });
 });
+
+describe('per-node detection modules',()=>{
+  it('defaults to both checked and accepts legacy configs without node overrides',()=>{
+    const config=defaultConfig();expect(config.defaults.modules).toEqual(['routes','unlocks']);expect(config.nodeModules).toEqual({});
+    const {nodeModules:_,...legacy}=config;expect(validateConfig(legacy).nodeModules).toEqual({});
+    expect(validateConfig({...config,nodeModules:{a:[]}}).nodeModules.a).toEqual([]);
+    expect(()=>validateConfig({...config,nodeModules:{a:['id;sh']}})).toThrow('项目');
+    expect(()=>validateConfig({...config,nodeModules:JSON.parse('{"__proto__":[]}')})).toThrow('标识');
+  });
+  it('persists independent modules and applies them to manual, preflight and prepare requests',async()=>{
+    for(const mode of ['detect','preflight','prepare']){
+      const h=harness();await h.runtime.configure({...defaultConfig(),nodeModules:{a:['unlocks'],b:['routes']}});
+      const restarted=h.create(),jobs=await restarted.enqueue({uuids:['a','b'],mode});
+      expect(jobs.map(job=>job.options.modules)).toEqual([['unlocks'],['routes']]);
+      expect(restarted.state.config.nodeModules).toEqual({a:['unlocks'],b:['routes']});
+    }
+  });
+  it('cannot re-enable a node-disabled module through request options and skips only disabled nodes in a batch',async()=>{
+    const h=harness();await h.runtime.configure({...defaultConfig(),nodeModules:{a:['unlocks'],b:[]}});
+    const response=await request(h.runtime,'start',{method:'POST',body:{uuids:['a','b'],options:{modules:['routes','unlocks']}}});
+    expect(response.status).toBe(202);expect(response.body.jobs[0].options.modules).toEqual(['unlocks']);expect(response.body.skipped).toEqual(['b']);
+    await expect(h.runtime.enqueue({uuids:['b']})).rejects.toThrow('均未启用');expect(h.runtime.state.jobs).toHaveLength(1);
+    expect(h.calls).toBe(0);
+  });
+  it('uses defaults until a node is explicitly set, and rejects unknown nodes',async()=>{
+    const h=harness(),config=defaultConfig();config.defaults.modules=['routes'];config.nodeModules={b:['unlocks']};await h.runtime.configure(config);
+    expect((await h.runtime.enqueue({uuids:['a','b']})).map(job=>job.options.modules)).toEqual([['routes'],['unlocks']]);
+    await expect(h.runtime.configure({...defaultConfig(),nodeModules:{nonexistent:['routes']}})).rejects.toThrow('不存在');
+  });
+  it('uses node choices for schedules, skips disabled nodes, and never enables a schedule by selecting modules',async()=>{
+    const h=harness();await h.runtime.configure({...defaultConfig(),nodeModules:{a:['unlocks']}});h.advance();await h.runtime.tick();expect(h.calls).toBe(0);
+    const plan={enabled:true,kind:'daily' as const,time:'04:00',weekday:0,cron:'0 4 * * *'};
+    const second=harness();await second.runtime.configure({...defaultConfig(),nodeModules:{a:['unlocks'],b:['routes'],hidden:[]},schedules:{a:plan,b:plan,hidden:plan}});
+    second.advance();await second.runtime.tick();expect(second.runtime.state.jobs.map(job=>[job.uuid,job.options.modules])).toEqual([['a',['unlocks']],['b',['routes']]]);expect(second.calls).toBe(1);
+  });
+  it('rechecks disabled modules before dispatch and does not turn an intentionally skipped task into a failure report',async()=>{
+    const h=harness();await h.runtime.enqueue({uuids:['a']});await h.runtime.configure({...defaultConfig(),nodeModules:{a:[]}});await h.runtime.tick();
+    expect(h.calls).toBe(0);expect(h.runtime.state.jobs[0].status).toBe('skipped');expect(h.runtime.history('a')).toEqual([]);
+    const second=harness();await second.runtime.enqueue({uuids:['a']});await second.runtime.configure({...defaultConfig(),nodeModules:{a:['unlocks']}});await second.runtime.tick();
+    expect(second.runtime.state.jobs[0].options.modules).toEqual(['unlocks']);expect(second.calls).toBe(1);
+  });
+  it('keeps running jobs intact and only archives results from the selected modules',async()=>{
+    const h=harness();await h.runtime.configure({...defaultConfig(),nodeModules:{a:['routes']}});await h.runtime.enqueue({uuids:['a']});await h.runtime.tick();
+    await h.runtime.configure({...defaultConfig(),nodeModules:{a:[]}});finish(h);await h.runtime.tick();
+    expect(h.runtime.history('a')[0].routes).toHaveLength(1);expect(h.runtime.history('a')[0].unlocks).toEqual([]);expect(h.runtime.history('a')[0].status).toBe('succeeded');expect(h.calls).toBe(1);
+  });
+  it('prevents anonymous node-setting changes',async()=>{
+    const h=harness();const result=await request(h.runtime,'config',{method:'POST',admin:false,body:{config:{...defaultConfig(),nodeModules:{a:[]}}}});
+    expect(result.status).toBe(403);expect(h.runtime.state.config.nodeModules).toEqual({});
+  });
+});

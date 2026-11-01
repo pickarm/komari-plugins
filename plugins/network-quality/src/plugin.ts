@@ -1,5 +1,5 @@
 import { definePlugin, server, type PluginRequest, type PluginResponse } from '@komari-monitor/plugin-sdk';
-import { defaultConfig, object, PROVINCES, validateConfig, validateOptions } from './config';
+import { defaultConfig, object, PROVINCES, validateConfig, validateOptions, optionsForNode } from './config';
 import { buildCommand, ENGINE_SOURCES } from './runner';
 import { parseResult } from './parsers';
 import { StateStore } from './store';
@@ -36,6 +36,7 @@ export class NetworkRuntime {
   }
   async configure(input:unknown):Promise<PluginConfig> {
     const config = validateConfig(input), nodes = await this.nodes();
+    if (Object.keys(config.nodeModules).some(uuid => !nodes[uuid])) throw new Error('检测配置包含不存在的节点');
     if (Object.keys(config.schedules).some(uuid => !nodes[uuid])) throw new Error('定时配置包含不存在的节点');
     this.state.config = config; this.state.lastScheduleMinute = Math.floor(this.now()/60000);
     this.store.prune(this.state,this.now()); this.save(); return config;
@@ -52,12 +53,17 @@ export class NetworkRuntime {
     if (!Array.isArray(data.uuids) || !data.uuids.length || data.uuids.length > 100 || data.uuids.some(uuid => typeof uuid !== 'string')) throw new Error('请选择 1–100 个节点');
     const uuids = [...new Set(data.uuids)] as string[], mode = data.mode ?? 'detect';
     if (!['detect','preflight','prepare'].includes(String(mode))) throw new Error('检测操作不正确');
-    const options = validateOptions(data.options ?? {},this.state.config.defaults), nodes = await this.nodes();
+    validateOptions(data.options ?? {},this.state.config.defaults);
+    const nodes = await this.nodes(), eligible: {uuid:string; options:DetectionOptions}[] = [];
     for (const uuid of uuids) {
       if (!nodes[uuid]) throw new Error('所选节点不存在');
+      const options = optionsForNode(this.state.config,uuid,data.options ?? {});
+      if (!options) continue;
       if (this.state.jobs.some(job => job.uuid === uuid && active(job))) throw new Error(`节点 ${nodes[uuid].name || uuid} 已有排队或运行中的任务`);
+      eligible.push({uuid,options});
     }
-    const jobs = uuids.map(uuid => this.add(uuid,mode as JobMode,options,'manual')); this.save(); return jobs;
+    if (!eligible.length) throw new Error('所选节点均未启用检测项目，请先勾选回程或流媒体与 AI 解锁检测');
+    const jobs = eligible.map(({uuid,options}) => this.add(uuid,mode as JobMode,options,'manual')); this.save(); return jobs;
   }
   private finishFailure(job:Job,error:string,status:Job['status']='failed') {
     job.errors.push(error); job.status=status; job.completedAt=new Date(this.now()).toISOString();
@@ -69,6 +75,10 @@ export class NetworkRuntime {
     if(job.mode==='detect') this.store.saveRaw(job.id,result.result);
     try { parsed = parseResult(result.result) as ParsedResult; }
     catch(error) { this.finishFailure(job,`结果解析失败：${message(error)}`); return; }
+    if (job.mode==='detect') {
+      if (!job.options.modules.includes('routes')) parsed.routes=[];
+      if (!job.options.modules.includes('unlocks')) parsed.unlocks=[];
+    }
     job.preflight = parsed.preflight;
     const errors = [...new Set([...(parsed.errors || []),...(parsed.preflight?.ok === false ? parsed.preflight.errors : [])])];
     const good = parsed.routes.some(route => route.status === 'ok' || route.status === 'no-response') || parsed.unlocks.some(unlock => unlock.status === 'available' || unlock.status === 'restricted');
@@ -107,6 +117,12 @@ export class NetworkRuntime {
     } catch(error) { console.warn('network-quality: waiting for task %s: %s',job.id,message(error)); }
   }
   private async dispatch(job:Job) {
+    // Apply a newly disabled module to queued work, while already-running jobs keep their original snapshot.
+    const allowed = this.state.config.nodeModules[job.uuid] ?? this.state.config.defaults.modules;
+    job.options.modules = job.options.modules.filter(module => allowed.includes(module));
+    if (!job.options.modules.length) {
+      job.status='skipped'; job.completedAt=new Date(this.now()).toISOString(); job.errors=['该节点的检测项目已关闭，未下发任务']; this.save(); return;
+    }
     try {
       const nodes=await this.nodes(),node=nodes[job.uuid];
       if(!node) { this.finishFailure(job,'节点已删除，未下发检测'); return; }
@@ -139,7 +155,10 @@ export class NetworkRuntime {
       if(enabled) {
         const nodes=await this.nodes();
         for(const [uuid,schedule] of Object.entries(this.state.config.schedules)) {
-          if(schedule.enabled && nodes[uuid] && cronMatches(scheduleCron(schedule),this.now()) && !this.state.jobs.some(job=>job.uuid===uuid && (active(job) || job.source==='schedule' && Math.floor(Date.parse(job.createdAt)/60000)===minute))) this.add(uuid,'detect',validateOptions(schedule.options || {},this.state.config.defaults),'schedule');
+          if(schedule.enabled && nodes[uuid] && cronMatches(scheduleCron(schedule),this.now()) && !this.state.jobs.some(job=>job.uuid===uuid && (active(job) || job.source==='schedule' && Math.floor(Date.parse(job.createdAt)/60000)===minute))) {
+            const options=optionsForNode(this.state.config,uuid,schedule.options || {});
+            if(options) this.add(uuid,'detect',options,'schedule');
+          }
         }
       }
       this.store.prune(this.state,this.now()); this.save();
@@ -173,7 +192,7 @@ export function registerRoutes(runtime:NetworkRuntime) {
   });
   route('GET','context',async(_req,res)=>reply(res,200,{version:1,config:runtime.state.config,effective:await runtime.effective(),defaults:defaultConfig(),nodes:await runtime.nodeList(),jobs:runtime.state.jobs,provinces:PROVINCES}));
   route('POST','config',async(req,res)=>{const data=object(JSON.parse(req.body),'请求');reply(res,200,{config:await runtime.configure(data.config)});});
-  route('POST','start',async(req,res)=>{const jobs=await runtime.enqueue(JSON.parse(req.body));reply(res,202,{jobs});});
+  route('POST','start',async(req,res)=>{const input=JSON.parse(req.body),jobs=await runtime.enqueue(input);const started=new Set(jobs.map(job=>job.uuid));reply(res,202,{jobs,skipped:[...new Set(input.uuids as string[])].filter(uuid=>!started.has(uuid))});});
   route('GET','jobs',async(req,res)=>reply(res,200,{jobs:runtime.state.jobs.filter(job=>!req.query.uuid || job.uuid===req.query.uuid)}));
   route('GET','history',async(req,res)=>reply(res,200,{reports:runtime.history(req.query.uuid || '')}));
   route('GET','raw',async(req,res)=>{

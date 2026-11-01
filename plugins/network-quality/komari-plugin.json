@@ -9,7 +9,7 @@
     "zh-CN": "远程检测全国三网回程、延迟、丢包与流媒体/AI解锁，保存历史，支持按节点手动启用定时任务。",
     "en": "Remote routing and service availability checks with saved history and opt-in schedules."
   },
-  "version": "1.1.0",
+  "version": "1.2.0",
   "entry": "script.js",
   "author": "pickarm",
   "url": "https://github.com/pickarm/komari-plugins",

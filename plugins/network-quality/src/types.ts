@@ -1,7 +1,7 @@
 export type ModuleName = 'routes' | 'unlocks';
 export type DetectionOptions = { modules: ModuleName[]; ipv: '4' | '6' | 'both'; provinces: string[]; count: number; parallel: number; timeoutMinutes: number };
 export type Schedule = { enabled: boolean; kind: 'daily' | 'weekly' | 'custom'; time: string; weekday: number; cron: string; options?: Partial<DetectionOptions> };
-export type PluginConfig = { enabled: boolean; publicEnabled: boolean; defaults: DetectionOptions; retentionDays: number; maxReportsPerNode: number; schedules: Record<string, Schedule> };
+export type PluginConfig = { enabled: boolean; publicEnabled: boolean; defaults: DetectionOptions; retentionDays: number; maxReportsPerNode: number; schedules: Record<string, Schedule>; nodeModules: Record<string, ModuleName[]> };
 export type RouteResult = { province: string; carrier: '电信' | '联通' | '移动'; family: 4 | 6; packetType?: 'standard' | 'large'; line: string | null; latency: number | null; loss: number | null; sent: number | null; received: number | null; status: 'ok' | 'no-response' | 'failed' | 'unsupported' };
 export type UnlockResult = { service: string; family: 4 | 6; status: 'available' | 'restricted' | 'unknown' | 'unsupported'; region: string | null; detail: string | null };
 export type Preflight = { ok: boolean; errors: string[]; missing: string[]; details: Record<string, string> };
@@ -10,7 +10,7 @@ export type RouteChange = { province: string; carrier: RouteResult['carrier']; f
 export type RouteComparison = { compared: number; changes: RouteChange[] };
 export type Report = { id: string; uuid: string; startedAt: string; completedAt: string; status: 'succeeded' | 'partial' | 'failed'; ipv: DetectionOptions['ipv']; routes: RouteResult[]; unlocks: UnlockResult[]; errors: string[]; options: DetectionOptions; taskId?: string; engines?: Record<string, string>; routeComparison?: RouteComparison };
 export type JobMode = 'detect' | 'preflight' | 'prepare';
-export type JobStatus = 'queued' | 'dispatching' | 'running' | 'succeeded' | 'partial' | 'failed' | 'timed-out' | 'uncertain';
+export type JobStatus = 'queued' | 'dispatching' | 'running' | 'succeeded' | 'partial' | 'failed' | 'timed-out' | 'uncertain' | 'skipped';
 export type Job = { id: string; uuid: string; mode: JobMode; source: 'manual' | 'schedule'; status: JobStatus; createdAt: string; startedAt?: string; completedAt?: string; taskId?: string; options: DetectionOptions; errors: string[]; preflight?: Preflight; engines?: Record<string,string> };
 export type PersistentState = { version: 1; config: PluginConfig; jobs: Job[]; reports: Report[]; lastScheduleMinute: number };
 export type NodeRecord = { uuid?: string; name?: string; hidden?: boolean; os?: string; [key: string]: unknown };
