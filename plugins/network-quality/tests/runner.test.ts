@@ -85,6 +85,15 @@ printf '\\nSOURCE_DRIFT_REJECTED\\n'
     expect(parseResult(output).preflight?.ok).toBe(false);
     expect(output).toContain('NQ_FIXTURE_CLEAN');
   }, 20000);
+  it('still attempts unlocks when the route helper download fails', () => {
+    const both = buildCommand('test-modules', options);
+    const worker = /cat > "\$TMP\/worker\.sh" <<'KOMARI_NQ_WORKER'\n([\s\S]*?)\nKOMARI_NQ_WORKER/.exec(both)![1];
+    const command = buildCommand('test-modules', {...options,modules:['unlocks']})
+      .replace(/cat > "\$TMP\/worker\.sh" <<'KOMARI_NQ_WORKER'[\s\S]*?\nKOMARI_NQ_WORKER/, `cat > "$TMP/worker.sh" <<'KOMARI_NQ_WORKER'\ncurl() { return 22; }\n${worker}\nKOMARI_NQ_WORKER`);
+    const result=parseResult(fixtureRun(command,true));
+    expect(result.errors).toContain('DOWNLOAD_bin/nexttrace-tiny');
+    expect(result.errors).toContain('DOWNLOAD_ip.sh');
+  },20000);
   it('kills a fake hanging worker and still emits a timeout result and cleans up', () => {
     const command = buildCommand('test-timeout', {...options,modules:['unlocks']})
       .replace(/cat > "\$TMP\/worker\.sh" <<'KOMARI_NQ_WORKER'[\s\S]*?\nKOMARI_NQ_WORKER/, `cat > "$TMP/worker.sh" <<'KOMARI_NQ_WORKER'\nsleep 20\nKOMARI_NQ_WORKER`)

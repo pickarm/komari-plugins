@@ -81,7 +81,12 @@ add_error() { ERR="$ERR\\"$1\\","; }
 add_pre_error() { PRE_ERRORS="$PRE_ERRORS\\"$1\\","; PRE_OK=false; }
 cleanup() {
   trap '' HUP INT TERM
-  if [ -n "$WORKER" ]; then kill -TERM "-$WORKER" 2>/dev/null || true; fi
+  if [ -n "$WORKER" ]; then
+    kill -TERM "-$WORKER" 2>/dev/null || true
+    sleep 1
+    kill -KILL "-$WORKER" 2>/dev/null || true
+    wait "$WORKER" 2>/dev/null || true
+  fi
   if [ -n "$WATCHDOG" ]; then kill -TERM "-$WATCHDOG" 2>/dev/null || true; fi
   [ -z "$TMP" ] || rm -rf -- "$TMP"
   if [ "$OWN_LOCK" = 1 ]; then rm -f "$LOCK/pid"; rmdir "$LOCK" 2>/dev/null || true; fi
@@ -179,7 +184,8 @@ fetch_checked() {
   if ! curl --proto '=https' --proto-redir '=https' --tlsv1.2 -fsSL --connect-timeout 15 --max-time 90 "$url" -o "$name"; then fail "DOWNLOAD_$name"; return 1; fi
   if ! printf '%s  %s\\n' "$sum" "$name" | sha256sum -c - >/dev/null 2>&1; then fail "CHECKSUM_$name"; rm -f "$name"; return 1; fi
 }
-${routes ? `${options.ipv !== '6' ? `mkdir -p "$TMPDIR/bin"
+${routes ? `if ! (
+${options.ipv !== '6' ? `mkdir -p "$TMPDIR/bin"
 case "$(uname -m)" in
   x86_64) trace_url='${ENGINE_SOURCES.nexttrace.amd64.url}'; trace_sha='${ENGINE_SOURCES.nexttrace.amd64.sha256}' ;;
   aarch64|arm64) trace_url='${ENGINE_SOURCES.nexttrace.arm64.url}'; trace_sha='${ENGINE_SOURCES.nexttrace.arm64.sha256}' ;;
@@ -199,7 +205,8 @@ export PATH
     fi
   done
   [ -s routes.csv ] || fail ROUTES_RESULT_MISSING
-fi` : ''}
+fi
+); then fail ROUTES_MODULE_FAILED; fi` : ''}
 ${unlocks ? `if fetch_checked ip.sh '${ENGINE_SOURCES.ip.url}' '${ENGINE_SOURCES.ip.sha256}'; then
   cat > ip-media-filter.awk <<'KOMARI_NQ_MEDIA_FILTER'
 ${IP_MEDIA_FILTER}

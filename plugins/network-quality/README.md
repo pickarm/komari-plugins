@@ -71,6 +71,6 @@ npm run build
 npm run pack
 ```
 
-版本标签为 `network-quality-v1.0.0`。发布工作流在测试后上传安装包。`vendor/` 保留已固定引擎的源码、许可证与来源，具体 commit 和 SHA-256 见 `src/runner.ts` 和 `THIRD_PARTY.md`。
+版本标签为 `network-quality-v1.0.1`。发布工作流在测试后上传安装包。`vendor/` 保留已固定引擎的源码、许可证与来源，具体 commit 和 SHA-256 见 `src/runner.ts` 和 `THIRD_PARTY.md`。
 
 当前自动化测试使用格式样例和模拟 Komari 任务，不代表所有实际 VPS / 网络已完成实机验证。正式使用前，建议先选择一台服务器检查环境并手动检测。
