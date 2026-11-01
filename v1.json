@@ -2,6 +2,21 @@
   "schema": 1,
   "plugins": [
     {
+      "name": { "zh-CN": "网络检测与历史报告", "en": "Network Quality Reports" },
+      "short": "network-quality",
+      "category": "monitoring",
+      "description": {
+        "zh-CN": "全国三网回程、IPv4大包/IPv6、延迟丢包与流媒体/AI解锁，保存历史并按节点可选启用定时；配套 Junimo 庄园主题。",
+        "en": "Saved routing, latency, loss and service availability reports with opt-in per-node schedules."
+      },
+      "version": "1.0.1",
+      "author": "pickarm",
+      "komari": ">=1.6.1",
+      "url": "https://github.com/pickarm/komari-plugins",
+      "download": "https://github.com/pickarm/komari-plugins/releases/download/network-quality-v1.0.1/network-quality-1.0.1.zip",
+      "sha256": "1ac593ce75f3493fc63dda82b883faa3c1bdc50c2c053e3ef4a2cea6bf160dcd"
+    },
+    {
       "name": { "zh-CN": "Ping 告警与报告", "en": "Ping Alerts and Reports" },
       "short": "ping-alert",
       "category": "monitoring",
