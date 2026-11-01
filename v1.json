@@ -9,15 +9,15 @@
       "short": "network-quality",
       "category": "monitoring",
       "description": {
-        "zh-CN": "全国三网回程、延迟丢包与解锁检测；持久保存线路变化前后对比、历史报告，可按节点启用定时。",
+        "zh-CN": "逐节点勾选回程与流媒体/AI解锁检测，默认全勾；保存线路变化、延迟丢包与历史报告，支持节点定时。",
         "en": "Saved routing, latency, loss and service availability reports with opt-in per-node schedules."
       },
-      "version": "1.1.0",
+      "version": "1.2.0",
       "author": "pickarm",
       "komari": ">=1.6.1",
       "url": "https://github.com/pickarm/komari-plugins",
-      "download": "https://github.com/pickarm/komari-plugins/releases/download/network-quality-v1.1.0/network-quality-1.1.0.zip",
-      "sha256": "98ed20026fb300d7fdc51f2f2230fa951989283b5845518dce17412418026aca"
+      "download": "https://github.com/pickarm/komari-plugins/releases/download/network-quality-v1.2.0/network-quality-1.2.0.zip",
+      "sha256": "e5e3d6ad0f7a1ea761f2731b1772ba9a7a98478a805bb09abf55a40244dd82ea"
     },
     {
       "name": {
