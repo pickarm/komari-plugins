@@ -3,8 +3,8 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 
 const encode = (value:string) => Buffer.from(value,'utf8').toString('base64');
-function envelope() {
-  const csv = '网络,省份,运营商,IP版本,状态,发送,收到,丢包率(%),平均延迟ms,线路\nIPv4大包,上海,电信,IPv4,OK,30,30,0,128,CN2GIA\n';
+function envelope(line="CN2GIA") {
+  const csv = '网络,省份,运营商,IP版本,状态,发送,收到,丢包率(%),平均延迟ms,线路\nIPv4大包,上海,电信,IPv4,OK,30,30,0,128,'+line+'\n';
   return `安装日志\nNQ_RESULT:${encode(JSON.stringify({version:1,mode:'detect',preflight:{ok:true,errors:[],missing:[],details:{os:'Linux'}},raw:{routesCsvBase64:encode(csv),unlockJsonBase64:{'4':encode(JSON.stringify({Media:{Netflix:{Status:'解锁',Region:'US',Type:'原生'}}}))}},errors:[]}))}\n`;
 }
 async function harness(files=new Map<string,string>(),tasks:any[]=[]) {
@@ -47,4 +47,16 @@ describe('packaged Komari VM integration',()=>{
     h.tasks[0].results=[{client:'a',result:envelope(),exit_code:0,finished_at:new Date().toISOString()}];await restarted.poll();
     expect((await restarted.request('history','GET',{}, {uuid:'a'})).data.reports).toHaveLength(1);expect(restarted.commands).toHaveLength(0);
   });
+});
+
+it('archives route switches in the actual VM and keeps them after restart',async()=>{
+  const h=await harness();await h.request('start','POST',{uuids:['a']});await h.poll();
+  h.tasks[0].results=[{client:'a',result:envelope(),exit_code:0,finished_at:new Date().toISOString()}];await h.poll();
+  vi.advanceTimersByTime(60000);await h.request('start','POST',{uuids:['a']});await h.poll();
+  h.tasks[1].results=[{client:'a',result:envelope('163'),exit_code:0,finished_at:new Date().toISOString()}];await h.poll();
+  const visible=await h.request('public','GET',{}, {uuid:'a'},false);
+  expect(visible.data.latest.routeComparison).toMatchObject({compared:1,changes:[{before:'CN2GIA',after:'163'}]});
+  const restarted=await harness(h.files,h.tasks);
+  expect((await restarted.request('public','GET',{}, {uuid:'a'},false)).data.latest.routeComparison.changes).toHaveLength(1);
+  expect(restarted.commands).toEqual([]);
 });

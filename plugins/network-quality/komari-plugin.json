@@ -1,15 +1,65 @@
 {
   "$schema": "./node_modules/@komari-monitor/plugin-sdk/schema/komari-plugin.schema.json",
-  "name": {"zh-CN":"网络检测与历史报告","en":"Network Quality Reports"},
+  "name": {
+    "zh-CN": "网络检测与历史报告",
+    "en": "Network Quality Reports"
+  },
   "short": "network-quality",
-  "description": {"zh-CN":"远程检测全国三网回程、延迟、丢包与流媒体/AI解锁，保存历史，支持按节点手动启用定时任务。","en":"Remote routing and service availability checks with saved history and opt-in schedules."},
-  "version":"1.0.1", "entry":"script.js", "author":"pickarm",
-  "url":"https://github.com/pickarm/komari-plugins", "komari":">=1.6.1",
-  "icon":"assets/network-quality.svg",
-  "permissions":{"node":true,"allowSystemRPC":true,"allowRoutes":true,"timeout":60,"maxHTTPBodyBytes":65536},
-  "configuration":{"type":"managed","data":[
-    {"key":"enabled","name":{"zh-CN":"启用插件","en":"Enable plugin"},"type":"switch","default":true,"help":{"zh-CN":"检测节点、模块、保存和定时策略请打开侧栏“网络检测与历史”。安装后不会自动启动检测。"}},
-    {"key":"public_enabled","name":{"zh-CN":"公开脱敏检测摘要","en":"Publish sanitized summaries"},"type":"switch","default":true,"help":{"zh-CN":"仅公开线路名称、延迟、丢包与解锁状态；隐藏节点及原始输出不公开。"}}
-  ]},
-  "pages":[{"file":"pages/admin.html","title":{"zh-CN":"网络检测与历史","en":"Network tests and history"},"visibility":"admin","type":"iframe"}]
+  "description": {
+    "zh-CN": "远程检测全国三网回程、延迟、丢包与流媒体/AI解锁，保存历史，支持按节点手动启用定时任务。",
+    "en": "Remote routing and service availability checks with saved history and opt-in schedules."
+  },
+  "version": "1.1.0",
+  "entry": "script.js",
+  "author": "pickarm",
+  "url": "https://github.com/pickarm/komari-plugins",
+  "komari": ">=1.6.1",
+  "icon": "assets/network-quality.svg",
+  "permissions": {
+    "node": true,
+    "allowSystemRPC": true,
+    "allowRoutes": true,
+    "timeout": 60,
+    "maxHTTPBodyBytes": 65536
+  },
+  "configuration": {
+    "type": "managed",
+    "data": [
+      {
+        "key": "enabled",
+        "name": {
+          "zh-CN": "启用插件",
+          "en": "Enable plugin"
+        },
+        "type": "switch",
+        "default": true,
+        "help": {
+          "zh-CN": "检测节点、模块、保存和定时策略请打开侧栏“网络检测与历史”。安装后不会自动启动检测。"
+        }
+      },
+      {
+        "key": "public_enabled",
+        "name": {
+          "zh-CN": "公开脱敏检测摘要",
+          "en": "Publish sanitized summaries"
+        },
+        "type": "switch",
+        "default": true,
+        "help": {
+          "zh-CN": "仅公开线路名称、延迟、丢包与解锁状态；隐藏节点及原始输出不公开。"
+        }
+      }
+    ]
+  },
+  "pages": [
+    {
+      "file": "pages/admin.html",
+      "title": {
+        "zh-CN": "网络检测与历史",
+        "en": "Network tests and history"
+      },
+      "visibility": "admin",
+      "type": "iframe"
+    }
+  ]
 }

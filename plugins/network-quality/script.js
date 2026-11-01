@@ -6,7 +6,7 @@
   var __getOwnPropNames = Object.getOwnPropertyNames;
   var __getProtoOf = Object.getPrototypeOf;
   var __hasOwnProp = Object.prototype.hasOwnProperty;
-  var __defNormalProp = (obj, key, value) => key in obj ? __defProp(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
+  var __defNormalProp = (obj, key2, value) => key2 in obj ? __defProp(obj, key2, { enumerable: true, configurable: true, writable: true, value }) : obj[key2] = value;
   var __require = /* @__PURE__ */ ((x) => typeof require !== "undefined" ? require : typeof Proxy !== "undefined" ? new Proxy(x, {
     get: (a, b) => (typeof require !== "undefined" ? require : a)[b]
   }) : x)(function(x) {
@@ -22,9 +22,9 @@
   };
   var __copyProps = (to, from, except, desc) => {
     if (from && typeof from === "object" || typeof from === "function") {
-      for (let key of __getOwnPropNames(from))
-        if (!__hasOwnProp.call(to, key) && key !== except)
-          __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
+      for (let key2 of __getOwnPropNames(from))
+        if (!__hasOwnProp.call(to, key2) && key2 !== except)
+          __defProp(to, key2, { get: () => from[key2], enumerable: !(desc = __getOwnPropDesc(from, key2)) || desc.enumerable });
     }
     return to;
   };
@@ -36,7 +36,7 @@
     isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target,
     mod
   ));
-  var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "symbol" ? key + "" : key, value);
+  var __publicField = (obj, key2, value) => __defNormalProp(obj, typeof key2 !== "symbol" ? key2 + "" : key2, value);
 
   // node_modules/@komari-monitor/plugin-sdk/src/manifest.js
   var require_manifest = __commonJS({
@@ -105,14 +105,14 @@
               "allowListen",
               "allowAllFileAccess"
             ];
-            for (const key of booleanKeys) {
-              if (manifest.permissions[key] !== void 0 && typeof manifest.permissions[key] !== "boolean") {
-                errors.push(`permissions.${key} must be a boolean`);
+            for (const key2 of booleanKeys) {
+              if (manifest.permissions[key2] !== void 0 && typeof manifest.permissions[key2] !== "boolean") {
+                errors.push(`permissions.${key2} must be a boolean`);
               }
             }
-            for (const key of ["maxHTTPBodyBytes", "maxChildOutputBytes", "timeout"]) {
-              if (manifest.permissions[key] !== void 0 && (!Number.isInteger(manifest.permissions[key]) || manifest.permissions[key] < 0)) {
-                errors.push(`permissions.${key} must be a non-negative integer`);
+            for (const key2 of ["maxHTTPBodyBytes", "maxChildOutputBytes", "timeout"]) {
+              if (manifest.permissions[key2] !== void 0 && (!Number.isInteger(manifest.permissions[key2]) || manifest.permissions[key2] < 0)) {
+                errors.push(`permissions.${key2} must be a non-negative integer`);
               }
             }
           }
@@ -531,7 +531,7 @@
     return value;
   }
   function keys(value, allowed) {
-    if (Object.keys(value).some((key) => !allowed.includes(key))) throw new Error("\u914D\u7F6E\u542B\u6709\u4E0D\u652F\u6301\u7684\u5B57\u6BB5");
+    if (Object.keys(value).some((key2) => !allowed.includes(key2))) throw new Error("\u914D\u7F6E\u542B\u6709\u4E0D\u652F\u6301\u7684\u5B57\u6BB5");
   }
   function bool(value, label) {
     if (typeof value !== "boolean") throw new Error(`${label}\u5FC5\u987B\u662F\u5F00\u5173`);
@@ -858,8 +858,8 @@ KOMARI_NQ_OUTER`;
       if (network !== "\u4E09\u7F51" && network !== "IPv4\u5927\u5305") continue;
       const familyText = column(row, "IP\u7248\u672C");
       if (familyText !== "IPv4" && familyText !== "IPv6") continue;
-      const province = text(column(row, "\u7701\u4EFD"));
-      if (!province) continue;
+      const province2 = text(column(row, "\u7701\u4EFD"));
+      if (!province2) continue;
       const family = familyText === "IPv4" ? 4 : 6;
       const sourceStatus = column(row, "\u72B6\u6001")?.toUpperCase();
       const sent = finite(column(row, "\u53D1\u9001"), 0);
@@ -868,15 +868,15 @@ KOMARI_NQ_OUTER`;
       const responded = received !== null && received > 0;
       const status = sourceStatus === "SKIP" ? "unsupported" : sourceStatus === "OK" && responded ? "ok" : sent !== null && sent > 0 && received === 0 ? "no-response" : "failed";
       const lineText = text(column(row, "\u7EBF\u8DEF"));
-      const line = lineText && !/^(?:Hidden|failed|unknown)$/i.test(lineText) ? lineText : null;
-      const key = `${province}:${carrier}:${family}`;
+      const line2 = lineText && !/^(?:Hidden|failed|unknown)$/i.test(lineText) ? lineText : null;
+      const key2 = `${province2}:${carrier}:${family}`;
       const packetType = network === "IPv4\u5927\u5305" ? "large" : "standard";
-      if (packetType === "standard" && results.get(key)?.packetType === "large") continue;
-      results.set(key, Object.assign({
-        province,
+      if (packetType === "standard" && results.get(key2)?.packetType === "large") continue;
+      results.set(key2, Object.assign({
+        province: province2,
         carrier,
         family,
-        line,
+        line: line2,
         latency: responded ? finite(column(row, "\u5E73\u5747\u5EF6\u8FDFms"), 0) : null,
         loss,
         sent,
@@ -965,10 +965,10 @@ KOMARI_NQ_OUTER`;
     }
     const pre = object2(source.preflight);
     const details = {};
-    for (const [key, value] of Object.entries(object2(pre.details))) if (typeof value === "string") details[key] = value.slice(0, 500);
+    for (const [key2, value] of Object.entries(object2(pre.details))) if (typeof value === "string") details[key2] = value.slice(0, 500);
     const preflight = { ok: pre.ok === true, errors: strings(pre.errors), missing: strings(pre.missing), details };
     const engines = {};
-    for (const [key, value] of Object.entries(object2(source.engines))) if (typeof value === "string") engines[key] = value.slice(0, 100);
+    for (const [key2, value] of Object.entries(object2(source.engines))) if (typeof value === "string") engines[key2] = value.slice(0, 100);
     return { version: 1, mode: typeof source.mode === "string" ? source.mode : void 0, preflight, routes, unlocks, errors, engines };
   }
 
@@ -1028,6 +1028,32 @@ KOMARI_NQ_OUTER`;
     }
   };
 
+  // src/routeChanges.ts
+  var province = (value) => PROVINCES.find((p) => value.startsWith(p.name))?.name ?? value;
+  var key = (route) => `${province(route.province)}:${route.carrier}:${route.family}:${route.packetType ?? "unmarked"}`;
+  function line(value) {
+    if (!value || /^(?:unknown|hidden|failed|未知|未知线路|不支持|无响应|—|--|-)$/i.test(value.trim())) return null;
+    return value.replace(/(?:[a-fA-F0-9]{0,4}:){2,}[a-fA-F0-9:.]{0,39}/g, "[IP]").replace(/(?:\d{1,3}\.){3}\d{1,3}/g, "[IP]").replace(/\s+/g, "").toUpperCase();
+  }
+  function compareRoutes(current, history) {
+    const result = { compared: 0, changes: [] };
+    if (current.status === "failed") return result;
+    const previous = history.filter((report) => report.uuid === current.uuid && report.id !== current.id && report.status !== "failed" && Date.parse(report.completedAt) <= Date.parse(current.startedAt) && (!current.engines?.TcpQuality || !report.engines?.TcpQuality || report.engines.TcpQuality === current.engines.TcpQuality)).sort((a, b) => Date.parse(b.completedAt) - Date.parse(a.completedAt));
+    const baselines = /* @__PURE__ */ new Map();
+    for (const report of previous) for (const route of report.routes) {
+      if (route.status === "ok" && line(route.line) && !baselines.has(key(route))) baselines.set(key(route), { route, report });
+    }
+    const seen = /* @__PURE__ */ new Set();
+    for (const route of current.routes) {
+      const id = key(route), before = baselines.get(id), after = line(route.line);
+      if (seen.has(id) || route.status !== "ok" || !after || !before) continue;
+      seen.add(id);
+      result.compared++;
+      if (line(before.route.line) !== after) result.changes.push({ province: province(route.province), carrier: route.carrier, family: route.family, ...route.packetType ? { packetType: route.packetType } : {}, before: before.route.line, after: route.line, previousReportId: before.report.id, previousCompletedAt: before.report.completedAt });
+    }
+    return result;
+  }
+
   // src/plugin.ts
   var BASE = "/api/plugins/network-quality/v1";
   var active = (job) => !job.completedAt;
@@ -1086,7 +1112,7 @@ KOMARI_NQ_OUTER`;
     async enqueue(input) {
       if (!(await this.effective()).enabled) throw new Error("\u7F51\u7EDC\u68C0\u6D4B\u603B\u5F00\u5173\u5DF2\u5173\u95ED");
       const data = object(input, "\u68C0\u6D4B\u8BF7\u6C42");
-      if (Object.keys(data).some((key) => !["uuids", "mode", "options"].includes(key))) throw new Error("\u68C0\u6D4B\u8BF7\u6C42\u542B\u6709\u4E0D\u652F\u6301\u7684\u5B57\u6BB5");
+      if (Object.keys(data).some((key2) => !["uuids", "mode", "options"].includes(key2))) throw new Error("\u68C0\u6D4B\u8BF7\u6C42\u542B\u6709\u4E0D\u652F\u6301\u7684\u5B57\u6BB5");
       if (!Array.isArray(data.uuids) || !data.uuids.length || data.uuids.length > 100 || data.uuids.some((uuid) => typeof uuid !== "string")) throw new Error("\u8BF7\u9009\u62E9 1\u2013100 \u4E2A\u8282\u70B9");
       const uuids = [...new Set(data.uuids)], mode = data.mode ?? "detect";
       if (!["detect", "preflight", "prepare"].includes(String(mode))) throw new Error("\u68C0\u6D4B\u64CD\u4F5C\u4E0D\u6B63\u786E");
@@ -1128,7 +1154,11 @@ KOMARI_NQ_OUTER`;
       if (result.exit_code !== 0 && !errors.length) errors.push(`\u8FDC\u7A0B\u68C0\u6D4B\u9000\u51FA\u7801\uFF1A${result.exit_code}`);
       job.errors = [...new Set(errors)];
       job.completedAt = result.finished_at && Number.isFinite(Date.parse(result.finished_at)) ? result.finished_at : new Date(this.now()).toISOString();
-      if (job.mode === "detect") this.state.reports.unshift({ id: job.id, uuid: job.uuid, startedAt: job.startedAt || job.createdAt, completedAt: job.completedAt, status: job.status, ipv: job.options.ipv, routes: parsed.routes, unlocks: parsed.unlocks, errors: job.errors, options: job.options, taskId: job.taskId, engines: job.engines });
+      if (job.mode === "detect") {
+        const report = { id: job.id, uuid: job.uuid, startedAt: job.startedAt || job.createdAt, completedAt: job.completedAt, status: job.status, ipv: job.options.ipv, routes: parsed.routes, unlocks: parsed.unlocks, errors: job.errors, options: job.options, taskId: job.taskId, engines: job.engines };
+        report.routeComparison = compareRoutes(report, this.state.reports);
+        this.state.reports.unshift(report);
+      }
       this.store.prune(this.state, this.now());
       this.save();
     }
@@ -1231,7 +1261,7 @@ ${buildCommand(job.id, job.options, job.mode)}`;
     }
   };
   function header(req, name) {
-    const found = Object.entries(req.headers).find(([key]) => key.toLowerCase() === name)?.[1];
+    const found = Object.entries(req.headers).find(([key2]) => key2.toLowerCase() === name)?.[1];
     return Array.isArray(found) ? found[0] || "" : found || "";
   }
   function isAdmin(req) {
@@ -1255,6 +1285,7 @@ ${buildCommand(job.id, job.options, job.mode)}`;
       completedAt: report.completedAt,
       status: report.status,
       ipv: report.ipv,
+      ...report.routeComparison ? { routeComparison: { compared: report.routeComparison.compared, changes: report.routeComparison.changes.map((change) => ({ province: privateText(change.province), carrier: change.carrier, family: change.family, ...change.packetType ? { packetType: change.packetType } : {}, before: privateText(change.before), after: privateText(change.after), previousReportId: change.previousReportId, previousCompletedAt: change.previousCompletedAt })) } } : {},
       routes: report.routes.map((route) => ({ province: privateText(route.province), carrier: route.carrier, family: route.family, ...route.packetType ? { packetType: route.packetType } : {}, line: route.line ? privateText(route.line) : null, latency: route.latency, loss: route.loss, sent: route.sent, received: route.received, status: route.status })),
       unlocks: report.unlocks.map((unlock) => ({ service: privateText(unlock.service), family: unlock.family, status: unlock.status, region: unlock.region ? privateText(unlock.region) : null, detail: unlock.detail ? privateText(unlock.detail) : null })),
       errors: report.errors.length ? ["\u90E8\u5206\u68C0\u6D4B\u672A\u5B8C\u6210\uFF0C\u8BE6\u60C5\u8BF7\u7BA1\u7406\u5458\u67E5\u770B\u539F\u59CB\u62A5\u544A"] : []

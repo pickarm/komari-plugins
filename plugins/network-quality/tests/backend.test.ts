@@ -143,3 +143,17 @@ describe('HTTP permission boundaries',()=>{
     }
   });
 });
+
+describe('route change persistence and privacy',()=>{
+  it('persists detected changes through restart and retention pruning, with sanitized public fields',async()=>{
+    const h=harness();await h.runtime.enqueue({uuids:['a']});await h.runtime.tick();finish(h);await h.runtime.tick();
+    h.advance();await h.runtime.enqueue({uuids:['a']});await h.runtime.tick();const changed=okResult();changed.routes[0].line='163 1.2.3.4';finish(h,changed);await h.runtime.tick();
+    expect(h.runtime.history('a')[0].routeComparison?.changes[0]).toMatchObject({before:'CN2GIA',after:'163 1.2.3.4'});
+    await h.runtime.configure({...defaultConfig(),maxReportsPerNode:1});const restarted=h.create();
+    expect(restarted.history('a')).toHaveLength(1);
+    const result=await request(restarted,'public',{query:{uuid:'a'},admin:false});
+    expect(result.body.latest.routeComparison.changes[0].after).toBe('163 [IP已隐藏]');
+    expect(JSON.stringify(result.body)).not.toContain('1.2.3.4');
+    expect((await request(restarted,'public',{query:{uuid:'hidden'},admin:false})).status).toBe(404);
+  });
+});

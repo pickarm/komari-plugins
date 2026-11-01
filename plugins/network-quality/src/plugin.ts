@@ -3,6 +3,7 @@ import { defaultConfig, object, PROVINCES, validateConfig, validateOptions } fro
 import { buildCommand, ENGINE_SOURCES } from './runner';
 import { parseResult } from './parsers';
 import { StateStore } from './store';
+import { compareRoutes } from './routeChanges';
 import { cronMatches, scheduleCron } from './schedules';
 import type { DetectionOptions, Job, JobMode, NodeRecord, ParsedResult, PersistentState, PluginConfig, Report } from './types';
 
@@ -82,7 +83,11 @@ export class NetworkRuntime {
     if(!usable && job.mode==='detect') errors.push('未返回可用检测结果');
     if(result.exit_code !== 0 && !errors.length) errors.push(`远程检测退出码：${result.exit_code}`);
     job.errors = [...new Set(errors)]; job.completedAt = result.finished_at && Number.isFinite(Date.parse(result.finished_at)) ? result.finished_at : new Date(this.now()).toISOString();
-    if(job.mode==='detect') this.state.reports.unshift({id:job.id,uuid:job.uuid,startedAt:job.startedAt || job.createdAt,completedAt:job.completedAt,status:job.status as Report['status'],ipv:job.options.ipv,routes:parsed.routes,unlocks:parsed.unlocks,errors:job.errors,options:job.options,taskId:job.taskId,engines:job.engines});
+    if(job.mode==='detect') {
+      const report:Report = {id:job.id,uuid:job.uuid,startedAt:job.startedAt || job.createdAt,completedAt:job.completedAt,status:job.status as Report['status'],ipv:job.options.ipv,routes:parsed.routes,unlocks:parsed.unlocks,errors:job.errors,options:job.options,taskId:job.taskId,engines:job.engines};
+      report.routeComparison = compareRoutes(report, this.state.reports);
+      this.state.reports.unshift(report);
+    }
     this.store.prune(this.state,this.now()); this.save();
   }
   private async collect(job:Job) {
@@ -153,6 +158,7 @@ function reply(res:PluginResponse,status:number,data:unknown) { res.statusCode=s
 function privateText(value:string):string { return String(value).replace(/\[?(?:[a-fA-F0-9]{0,4}:){2,}[a-fA-F0-9:.]{0,39}(?:%[a-zA-Z0-9_.-]+)?\]?/g,'[IP已隐藏]').replace(/(?:\d{1,3}\.){3}\d{1,3}/g,'[IP已隐藏]').slice(0,300); }
 export function publicReport(report:Report) {
   return {id:report.id,uuid:report.uuid,startedAt:report.startedAt,completedAt:report.completedAt,status:report.status,ipv:report.ipv,
+    ...(report.routeComparison ? {routeComparison:{compared:report.routeComparison.compared,changes:report.routeComparison.changes.map(change=>({province:privateText(change.province),carrier:change.carrier,family:change.family,...(change.packetType?{packetType:change.packetType}:{}),before:privateText(change.before),after:privateText(change.after),previousReportId:change.previousReportId,previousCompletedAt:change.previousCompletedAt}))}} : {}),
     routes:report.routes.map(route=>({province:privateText(route.province),carrier:route.carrier,family:route.family,...(route.packetType?{packetType:route.packetType}:{}),line:route.line?privateText(route.line):null,latency:route.latency,loss:route.loss,sent:route.sent,received:route.received,status:route.status})),
     unlocks:report.unlocks.map(unlock=>({service:privateText(unlock.service),family:unlock.family,status:unlock.status,region:unlock.region?privateText(unlock.region):null,detail:unlock.detail?privateText(unlock.detail):null})),errors:report.errors.length?['部分检测未完成，详情请管理员查看原始报告']:[]};
 }
