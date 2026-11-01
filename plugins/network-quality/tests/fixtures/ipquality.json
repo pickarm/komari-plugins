@@ -1,0 +1,14 @@
+{
+  "Head": {"IP": "192.0.2.*", "Time": "2026-11-01 00:00:00", "Version": "fixture"},
+  "Info": {}, "Type": {}, "Score": {}, "Factor": {},
+  "Media": {
+    "TikTok": {"Status": " 解锁 ", "Region": "US", "Type": " 原生 "},
+    "DisneyPlus": {"Status": " 失败 ", "Region": "null", "Type": "null"},
+    "Netflix": {"Status": " 仅自制 ", "Region": "US", "Type": " 原生 "},
+    "Youtube": {"Status": " 禁会员 ", "Region": "CN", "Type": "null"},
+    "AmazonPrimeVideo": {"Status": " 待支持 ", "Region": "null", "Type": "null"},
+    "Reddit": {"Status": " 屏蔽 ", "Region": "null", "Type": "null"},
+    "ChatGPT": {"Status": " 仅网页 ", "Region": "US", "Type": " DNS "}
+  },
+  "Mail": {}
+}

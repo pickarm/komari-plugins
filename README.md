@@ -12,8 +12,11 @@
 | 插件 | 目录 | 要求 |
 | --- | --- | --- |
 | Ping 告警与报告 | [plugins/ping-alert](plugins/ping-alert) | Komari >=1.6.1 |
+| 网络检测与历史报告 | [plugins/network-quality](plugins/network-quality) | Komari >=1.6.1、Linux Agent |
 
 Ping 告警默认连续异常 **10 次实际探测**才通知，连续成功 2 次后通知恢复。支持延迟与丢包率阈值、中文通知模板预览及模拟发送；日报、周报、月报及自定义报告仅包含已开启的检测项，两项关闭时不生成。检查间隔和回溯配置已移除。配置详情及限制见插件自身 README。
+
+网络检测插件提供三网回程表、延迟丢包、流媒体/AI 解锁、历史保存和按节点定时，安装后定时默认关闭。主题展示适配见 [Junimo 二次开发版](https://github.com/pickarm/junimo)，插件后台也可独立使用。仓库中各插件独立声明许可证；网络检测插件及其引擎的许可和来源见对应目录。
 
 ## 新增插件
 
